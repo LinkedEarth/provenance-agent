@@ -1,0 +1,48 @@
+name: paleobooks-env
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12
+  - jupyter
+  - jupyterlab
+  - ipykernel
+  - cartopy>=0.21.1
+  - netCDF4
+  - dask
+  - bottleneck
+  - cftime
+  - nc-time-axis
+  - s3fs
+  - gcsfs
+  - fsspec
+  - requests
+  - tqdm
+  - intake
+  - climlab
+  - pip
+
+  - pip:
+    # LinkedEarth paleoclimate ecosystem
+    - pyleoclim>=1.3.0
+    - pylipd>=1.5.3
+    - cfr
+    - pens
+
+    # Standard scientific stack
+    - numpy
+    - pandas>=2.0.0
+    - xarray>=2025.12.0
+    - scipy
+    - matplotlib
+    - seaborn
+
+    # Data access
+    - pangaeapy
+    - pooch>=1.8.2
+    - intake-esm
+
+    # Visualization
+    - folium
+    - ipympl
