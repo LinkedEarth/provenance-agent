@@ -1,30 +1,7 @@
 """
-bibliography.py
-
-Purpose:
-    Generates an APA 7th edition bibliography from a list of library names
-    (as returned by notebook_parser). Looks up each library in the Citations/
-    directory, collects the relevant .bib entries, deduplicates by DOI, and
-    renders them through pandoc + apa.csl.
-
-Implementation:
-    Uses PyYAML to read library_citations.yml (the library-to-BibTeX-key mapping)
-    and pybtex to parse/filter .bib entries. Rendering is delegated to pandoc with
-    the bundled apa.csl file via a single subprocess call — this handles all APA
-    formatting edge cases (author truncation, italics, entry-type-specific layout)
-    without reimplementing a citation style engine in Python.
-
-Design Decisions:
-    - pandoc + apa.csl over pybtex-apa7-style or hand-written formatting: pandoc is
-      a widely-installed tool with battle-tested CSL support; the apa.csl file is
-      bundled in the repo so rendering is fully offline.
-    - Deduplication is by DOI: if a library's paper and software citations share the
-      same DOI, only one entry is written to the temp .bib file.
-    - Citation order follows notebook import order, not APA alphabetical, so the
-      bibliography reflects the narrative structure of the notebook.
-    - A temporary .bib file is assembled with only the needed entries and passed to
-      pandoc, rather than merging all .bib files, so the output is scoped to exactly
-      what the notebook imports.
+Generates an APA 7th edition bibliography from library names extracted by
+notebook_parser. Looks up each library in Citations/, collects .bib entries,
+deduplicates by DOI, and renders via pandoc + the bundled apa.csl.
 """
 
 import os
@@ -36,34 +13,18 @@ from pybtex.database import parse_file, BibliographyData
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
-
-
 _CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
 
 
 def load_citation_index(citations_dir: str = _CITATIONS_DIR) -> dict:
-    """
-    @brief:       Loads library_citations.yml and returns the mapping of library
-                  names to their BibTeX citation keys.
-    @params[in]:  citations_dir - path to the Citations/ directory
-    @params[out]: dict mapping library name (str) to dict of citation type -> key,
-                  e.g. {"pandas": {"paper": "mckinney2010data", "software": "pandas_software"}}
-    """
+    """Loads library_citations.yml mapping library names to BibTeX keys."""
     yml_path = os.path.join(citations_dir, "library_citations.yml")
     with open(yml_path) as f:
         return yaml.safe_load(f)
 
 
 def collect_entries(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -> BibliographyData:
-    """
-    @brief:       For each library in the ordered input list, loads the matching .bib
-                  file and extracts the entries listed in library_citations.yml.
-                  Deduplicates entries that share a DOI. Preserves insertion order
-                  so the output follows notebook appearance order.
-    @params[in]:  libraries     - ordered list of library name strings
-                  citations_dir - path to Citations/ directory
-    @params[out]: a pybtex BibliographyData containing only the needed entries
-    """
+    """Collects .bib entries for each library, deduplicating by DOI."""
     index = load_citation_index(citations_dir)
     seen_dois = set()
     merged = BibliographyData()
@@ -97,13 +58,7 @@ def collect_entries(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -
 
 
 def render_apa(bib_data: BibliographyData, citations_dir: str = _CITATIONS_DIR) -> str:
-    """
-    @brief:       Renders a pybtex BibliographyData object as APA 7th edition
-                  plain text using pandoc and the bundled apa.csl file.
-    @params[in]:  bib_data      - pybtex BibliographyData with entries to render
-                  citations_dir - path to Citations/ directory (for locating apa.csl)
-    @params[out]: APA-formatted bibliography as a plain text string
-    """
+    """Renders BibliographyData as APA 7th edition plain text via pandoc."""
     csl_path = os.path.join(citations_dir, "apa.csl")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".bib", delete=False) as tmp:
@@ -132,16 +87,7 @@ def render_apa(bib_data: BibliographyData, citations_dir: str = _CITATIONS_DIR) 
 
 
 def generate_bibliography(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -> str:
-    """
-    @brief:       Main entry point. Takes an ordered list of library names (from
-                  notebook_parser) and produces an APA-style bibliography string.
-                  Includes both paper and software citations for each library.
-                  Entries sharing a DOI are deduplicated. Output order matches
-                  the input list (notebook order of appearance).
-    @params[in]:  libraries     - ordered list of library name strings
-                  citations_dir - path to Citations/ directory
-    @params[out]: APA-formatted bibliography as a plain text string
-    """
+    """Main entry point: produces APA bibliography for a list of library names."""
     index = load_citation_index(citations_dir)
     entries = collect_entries(libraries, citations_dir)
 
