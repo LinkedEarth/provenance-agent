@@ -1,0 +1,36 @@
+## Maps each library to its citation keys (matching the BibTeX keys in the .bib files).
+## "paper" is the academic publication; "software" is the Zenodo/software record.
+## Not all libraries have both types.
+
+pandas:
+  paper: mckinney2010data
+  software: pandas_software
+
+numpy:
+  paper: harris2020array
+
+matplotlib:
+  paper: hunter2007matplotlib
+  software: matplotlib_software
+
+xarray:
+  paper: hoyer2017xarray
+  software: xarray_software
+
+cartopy:
+  software: cartopy_manual
+  software_versioned: phil_elson_2024_13905945
+
+pyleoclim:
+  paper: khider2022pyleoclim
+  software: pyleoclim_software
+
+pylipd:
+  paper: mckay2016lipd
+  software: pylipd_software
+
+pyleotups:
+  software: pyleotups_software
+
+ammonyte:
+  software: James_Ammonyte_A_Python_2023
