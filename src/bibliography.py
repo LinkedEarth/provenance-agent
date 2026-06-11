@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import yaml
+import nbformat
 from pybtex.database import parse_file, BibliographyData
 
 
@@ -104,16 +105,29 @@ def generate_bibliography(libraries: list[str], citations_dir: str = _CITATIONS_
     return "\n\n".join(parts)
 
 
-if __name__ == "__main__":
-    import sys
+def add_bibliography_to_notebook(notebook_path: str, citations_dir: str = _CITATIONS_DIR) -> None:
+    """Parses a notebook for libraries, generates APA bibliography, and appends it as a markdown cell."""
     sys.path.insert(0, os.path.dirname(__file__))
     from notebook_parser import parse_notebook
 
+    result = parse_notebook(notebook_path)
+    bib_text = generate_bibliography(result["libraries"], citations_dir)
+
+    with open(notebook_path) as f:
+        nb = nbformat.read(f, as_version=4)
+
+    cell_source = "## Bibliography\n\n" + bib_text
+    new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
+    nb.cells.append(new_cell)
+
+    with open(notebook_path, "w") as f:
+        nbformat.write(nb, f)
+
+
+if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python bibliography.py <path_to_notebook.ipynb>")
         sys.exit(1)
 
-    result = parse_notebook(sys.argv[1])
-    print("Libraries found:", result["libraries"])
-    print("\n--- Bibliography ---\n")
-    print(generate_bibliography(result["libraries"]))
+    add_bibliography_to_notebook(sys.argv[1])
+    print(f"Bibliography appended to {sys.argv[1]}")
