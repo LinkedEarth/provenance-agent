@@ -10,8 +10,8 @@ numpy:
   paper: harris2020array
 
 matplotlib:
-  paper: hunter2007matplotlib
-  software: matplotlib_software
+  paper: Hunter:2007
+  software: the_matplotlib_development_team_2026_20149089
 
 xarray:
   paper: hoyer2017xarray
