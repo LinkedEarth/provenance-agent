@@ -1,7 +1,6 @@
 """
-Parses Jupyter Notebook (.ipynb) files to extract cell structure and library
-imports. Uses nbformat for notebook I/O and ast for import extraction (preferred
-over regex for correct handling of multi-line/aliased/from-imports).
+Parses Jupyter Notebook (.ipynb) files to extract library imports and LiPD
+dataset references. Uses nbformat for notebook I/O and ast for code analysis.
 """
 
 import ast
@@ -65,6 +64,70 @@ def extract_libraries(code: str) -> set[str]:
     return libraries
 
 
+_LIPD_LOAD_METHODS = frozenset({"load", "load_remote_datasets", "load_from_dir"})
+
+
+def _collect_string_variables(tree: ast.AST) -> dict[str, str]:
+    """Tracks simple name = 'string' assignments for variable resolution."""
+    variables = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            variables[node.targets[0].id] = node.value.value
+    return variables
+
+
+def _resolve_to_strings(node: ast.AST, variables: dict[str, str]) -> list[str]:
+    """Resolves an AST node (constant, list, or variable) to string values."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.List):
+        result = []
+        for elt in node.elts:
+            result.extend(_resolve_to_strings(elt, variables))
+        return result
+    if isinstance(node, ast.Name) and node.id in variables:
+        return [variables[node.id]]
+    return []
+
+
+def _normalize_dataset_name(raw: str) -> str:
+    """Extracts a dataset name from a file path, URL, or raw name."""
+    name = raw.rstrip("/")
+    name = name.rsplit("/", 1)[-1] if "/" in name else name
+    if name.endswith(".lpd"):
+        name = name[:-4]
+    return name
+
+
+def extract_datasets(code: str) -> set[str]:
+    """Extracts LiPD dataset names from calls to LiPD load methods."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(strip_ipython_directives(code))
+    except SyntaxError:
+        return set()
+
+    variables = _collect_string_variables(tree)
+    datasets = set()
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _LIPD_LOAD_METHODS
+                and node.args):
+            continue
+
+        for s in _resolve_to_strings(node.args[0], variables):
+            datasets.add(_normalize_dataset_name(s))
+
+    return datasets
+
+
 def parse_notebook(path: str | None = None) -> dict:
     """Reads a .ipynb file and returns its imported libraries and datasets."""
     if path is None:
@@ -81,11 +144,13 @@ def parse_notebook(path: str | None = None) -> dict:
         nb = nbformat.read(f, as_version=4)
 
     libraries = set()
+    datasets = set()
     for cell in nb.cells:
         if cell.cell_type == "code":
             libraries |= extract_libraries(cell.source)
+            datasets |= extract_datasets(cell.source)
 
-    return {"libraries": sorted(libraries), "datasets": []}
+    return {"libraries": sorted(libraries), "datasets": sorted(datasets)}
 
 
 if __name__ == "__main__":
@@ -95,3 +160,4 @@ if __name__ == "__main__":
         sys.exit(1)
     result = parse_notebook(sys.argv[1])
     print("Libraries:", result["libraries"])
+    print("Datasets:", result["datasets"])

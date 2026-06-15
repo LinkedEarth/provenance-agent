@@ -10,7 +10,7 @@ import sys
 import tempfile
 import yaml
 import nbformat
-from pybtex.database import parse_file, BibliographyData
+from pybtex.database import parse_file, parse_string, BibliographyData
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
@@ -24,8 +24,27 @@ def load_citation_index(citations_dir: str = _CITATIONS_DIR) -> dict:
         return yaml.safe_load(f)
 
 
-def collect_entries(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -> BibliographyData:
-    """Collects .bib entries for each library, deduplicating by DOI."""
+def _add_entries(source: BibliographyData, dest: BibliographyData, seen_dois: set) -> None:
+    """Merges entries from source into dest, deduplicating by DOI."""
+    for key, entry in source.entries.items():
+        doi = entry.fields.get("doi", "")
+        if doi and doi in seen_dois:
+            continue
+        if doi:
+            seen_dois.add(doi)
+        dest.entries[key] = entry
+
+
+def collect_entries(
+    libraries: list[str],
+    citations_dir: str = _CITATIONS_DIR,
+    citation_types: list[str] | None = None,
+) -> BibliographyData:
+    """Collects BibTeX entries for each library, deduplicating by DOI.
+
+    citation_types filters by type (e.g. ["paper"], ["software"]).
+    None means all types.
+    """
     index = load_citation_index(citations_dir)
     seen_dois = set()
     merged = BibliographyData()
@@ -35,25 +54,17 @@ def collect_entries(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -
         if lib_lower not in index:
             continue
 
-        bib_path = os.path.join(citations_dir, f"{lib_lower}.bib")
-        if not os.path.exists(bib_path):
-            continue
+        lib_entry = index[lib_lower] or {}
 
-        bib_data = parse_file(bib_path)
-        lib_keys = index[lib_lower]
+        if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
+            paper_bib = parse_string(lib_entry["paper"], bib_format="bibtex")
+            _add_entries(paper_bib, merged, seen_dois)
 
-        for cite_key in lib_keys.values():
-            if cite_key not in bib_data.entries:
-                continue
-
-            entry = bib_data.entries[cite_key]
-            doi = entry.fields.get("doi", "")
-            if doi and doi in seen_dois:
-                continue
-            if doi:
-                seen_dois.add(doi)
-
-            merged.entries[cite_key] = entry
+        if not citation_types or "software" in citation_types:
+            bib_path = os.path.join(citations_dir, f"{lib_lower}.bib")
+            if os.path.exists(bib_path):
+                software_bib = parse_file(bib_path)
+                _add_entries(software_bib, merged, seen_dois)
 
     return merged
 
@@ -87,10 +98,14 @@ def render_apa(bib_data: BibliographyData, citations_dir: str = _CITATIONS_DIR) 
         os.unlink(tmp_path)
 
 
-def generate_bibliography(libraries: list[str], citations_dir: str = _CITATIONS_DIR) -> str:
+def generate_bibliography(
+    libraries: list[str],
+    citations_dir: str = _CITATIONS_DIR,
+    citation_types: list[str] | None = None,
+) -> str:
     """Main entry point: produces APA bibliography for a list of library names."""
     index = load_citation_index(citations_dir)
-    entries = collect_entries(libraries, citations_dir)
+    entries = collect_entries(libraries, citations_dir, citation_types)
 
     not_found = [lib for lib in libraries
                  if lib.lower() not in index and lib not in _STDLIB_MODULES]
