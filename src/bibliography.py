@@ -7,7 +7,7 @@ deduplicates by DOI, and renders via pandoc + the bundled apa.csl.
 import os
 import sys
 import yaml
-import nbformat
+# import nbformat  # needed when add_bibliography_to_notebook is re-enabled
 from pybtex.database import parse_file, parse_string, BibliographyData
 
 
@@ -71,21 +71,34 @@ def collect_entries(
     return merged
 
 
+# def render_apa(bib_data: BibliographyData) -> str:
+#     """
+#     Placeholder: returns raw BibTeX instead of APA.
+#     """
+#     return bib_data.to_string(bib_format="bibtex").strip()
+
+
 def render_apa(bib_data: BibliographyData) -> str:
     """
-    Converts BibliographyData to APA 7th edition plain text.
-
-    Currently returns raw BibTeX as a placeholder. This will be replaced
-    by an LLM call that converts BibTeX to APA format.
+    Converts BibliographyData to APA 7th edition plain text by sending
+    each BibTeX entry through the LLM via langchain.bibtex_to_apa().
 
     Args:
         bib_data: collected BibTeX entries from collect_entries()
 
     Returns:
-        formatted citation string (currently raw BibTeX)
+        APA-formatted citation string with entries separated by blank lines
     """
-    # TODO: replace with LLM-based BibTeX-to-APA conversion
-    return bib_data.to_string(bib_format="bibtex").strip()
+    from llm import bibtex_to_apa
+
+    citations = []
+    for key, entry in bib_data.entries.items():
+        single = BibliographyData(entries={key: entry})
+        bibtex_str = single.to_string(bib_format="bibtex").strip()
+        apa = bibtex_to_apa(bibtex_str)
+        citations.append(apa)
+
+    return "\n\n".join(citations)
 
 
 def generate_bibliography(
@@ -119,55 +132,55 @@ def generate_bibliography(
     return "\n\n".join(parts)
 
 
-def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None) -> None:
-    """
-    Appends a bibliography as a new markdown cell at the end of a notebook.
-    Writes to the .ipynb file on disk via nbformat and also injects the
-    cell into the live notebook UI via IPython so it appears immediately
-    without a manual reload.
-
-    If no path is given, attempts to auto-detect the current notebook
-    path using ipynbname (must be called from inside a running notebook).
-
-    Note: VS Code may show a file conflict warning on save since the
-    file was modified on disk. Select "Overwrite" — the editor state
-    will already match what was written.
-
-    Args:
-        bib_text: pre-generated bibliography string to insert
-        notebook_path: file path to a .ipynb notebook, or None for
-            auto-detection
-
-    Returns:
-        None (modifies the notebook file in place and displays in UI)
-    """
-    if notebook_path is None:
-        try:
-            import ipynbname
-            notebook_path = str(ipynbname.path())
-        except Exception:
-            raise RuntimeError(
-                "Could not auto-detect the current notebook path. "
-                "Install ipynbname (`pip install ipynbname`) and call from inside a running notebook, "
-                "or pass an explicit notebook_path."
-            )
-
-    cell_source = "## Bibliography\n\n" + bib_text
-
-    with open(notebook_path) as f:
-        nb = nbformat.read(f, as_version=4)
-
-    new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
-    nb.cells.append(new_cell)
-
-    with open(notebook_path, "w") as f:
-        nbformat.write(nb, f)
-
-    try:
-        from IPython.display import display, Markdown
-        display(Markdown(cell_source))
-    except Exception:
-        pass
+# def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None) -> None:
+#     """
+#     Appends a bibliography as a new markdown cell at the end of a notebook.
+#     Writes to the .ipynb file on disk via nbformat and also injects the
+#     cell into the live notebook UI via IPython so it appears immediately
+#     without a manual reload.
+#
+#     If no path is given, attempts to auto-detect the current notebook
+#     path using ipynbname (must be called from inside a running notebook).
+#
+#     Note: VS Code may show a file conflict warning on save since the
+#     file was modified on disk. Select "Overwrite" — the editor state
+#     will already match what was written.
+#
+#     Args:
+#         bib_text: pre-generated bibliography string to insert
+#         notebook_path: file path to a .ipynb notebook, or None for
+#             auto-detection
+#
+#     Returns:
+#         None (modifies the notebook file in place and displays in UI)
+#     """
+#     if notebook_path is None:
+#         try:
+#             import ipynbname
+#             notebook_path = str(ipynbname.path())
+#         except Exception:
+#             raise RuntimeError(
+#                 "Could not auto-detect the current notebook path. "
+#                 "Install ipynbname (`pip install ipynbname`) and call from inside a running notebook, "
+#                 "or pass an explicit notebook_path."
+#             )
+#
+#     cell_source = "## Bibliography\n\n" + bib_text
+#
+#     with open(notebook_path) as f:
+#         nb = nbformat.read(f, as_version=4)
+#
+#     new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
+#     nb.cells.append(new_cell)
+#
+#     with open(notebook_path, "w") as f:
+#         nbformat.write(nb, f)
+#
+#     try:
+#         from IPython.display import display, Markdown
+#         display(Markdown(cell_source))
+#     except Exception:
+#         pass
 
 
 if __name__ == "__main__":
@@ -181,5 +194,4 @@ if __name__ == "__main__":
     notebook_path = sys.argv[1]
     result = parse_notebook(notebook_path)
     bib_text = generate_bibliography(result["libraries"])
-    add_bibliography_to_notebook(bib_text, notebook_path)
-    print(f"Bibliography appended to {notebook_path}")
+    print(bib_text)
