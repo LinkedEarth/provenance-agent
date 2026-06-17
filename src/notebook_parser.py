@@ -128,6 +128,25 @@ def extract_datasets(code: str) -> set[str]:
     return datasets
 
 
+def validate_libraries(requested: list[str], available: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Checks which requested libraries are present in the notebook's
+    import list. Comparison is case-insensitive.
+
+    Args:
+        requested: library names the user asked for
+        available: library names returned by parse_notebook()
+
+    Returns:
+        tuple of (found, not_found) — libraries that were/weren't in
+        the notebook
+    """
+    available_lower = {lib.lower() for lib in available}
+    found = [lib for lib in requested if lib.lower() in available_lower]
+    not_found = [lib for lib in requested if lib.lower() not in available_lower]
+    return found, not_found
+
+
 def parse_notebook(path: str | None = None) -> dict:
     """Reads a .ipynb file and returns its imported libraries and datasets."""
     if path is None:
