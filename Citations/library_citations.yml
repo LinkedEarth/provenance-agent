@@ -1,0 +1,115 @@
+## Maps each library to its paper citation and software citation file.
+## Paper citations are inlined as BibTeX; software citations reference .bib files.
+## Not all libraries have both citation types.
+
+pandas:
+  paper: |
+    @InProceedings{mckinney2010data,
+      author    = {Wes McKinney},
+      title     = {Data Structures for Statistical Computing in Python},
+      booktitle = {Proceedings of the 9th Python in Science Conference},
+      pages     = {56--61},
+      year      = {2010},
+      editor    = {St\'efan van der Walt and Jarrod Millman},
+      doi       = {10.25080/Majora-92bf1922-00a}
+    }
+  software: pandas.bib
+
+numpy:
+  paper: |
+    @Article{harris2020array,
+      author    = {Charles R. Harris and K. Jarrod Millman and St{\'e}fan J.
+                   van der Walt and Ralf Gommers and Pauli Virtanen and David
+                   Cournapeau and Eric Wieser and Julian Taylor and Sebastian
+                   Berg and Nathaniel J. Smith and Robert Kern and Matti Picus
+                   and Stephan Hoyer and Marten H. van Kerkwijk and Matthew
+                   Brett and Allan Haldane and Jaime Fern{\'a}ndez del
+                   R{\'i}o and Mark Wiebe and Pearu Peterson and Pierre
+                   G{\'e}rard-Marchant and Kevin Sheppard and Tyler Reddy and
+                   Warren Weckesser and Hameer Abbasi and Christoph Gohlke and
+                   Travis E. Oliphant},
+      title     = {Array programming with {NumPy}},
+      journal   = {Nature},
+      volume    = {585},
+      number    = {7825},
+      pages     = {357--362},
+      year      = {2020},
+      publisher = {Springer Science and Business Media {LLC}},
+      doi       = {10.1038/s41586-020-2649-2},
+      url       = {https://doi.org/10.1038/s41586-020-2649-2}
+    }
+
+matplotlib:
+  paper: |
+    @Article{Hunter:2007,
+      Author    = {Hunter, J. D.},
+      Title     = {Matplotlib: A 2D graphics environment},
+      Journal   = {Computing in Science \& Engineering},
+      Volume    = {9},
+      Number    = {3},
+      Pages     = {90--95},
+      abstract  = {Matplotlib is a 2D graphics package used for Python for
+      application development, interactive scripting, and publication-quality
+      image generation across user interfaces and operating systems.},
+      publisher = {IEEE COMPUTER SOC},
+      doi       = {10.1109/MCSE.2007.55},
+      year      = 2007
+    }
+  software: matplotlib.bib
+
+xarray:
+  paper: |
+    @Article{hoyer2017xarray,
+      author    = {Hoyer, S. and Hamman, J.},
+      title     = {xarray: {N-D} labeled arrays and datasets in {Python}},
+      journal   = {Journal of Open Research Software},
+      volume    = {5},
+      number    = {1},
+      pages     = {10},
+      year      = {2017},
+      publisher = {Ubiquity Press},
+      doi       = {10.5334/jors.148},
+      url       = {https://doi.org/10.5334/jors.148}
+    }
+  software: xarray.bib
+
+cartopy:
+  software: cartopy.bib
+
+pyleoclim:
+  paper: |
+    @Article{khider2022pyleoclim,
+      author  = {Khider, Deborah and Emile-Geay, Julien and Zhu, Feng and
+                 James, Alexander and Landers, Jordan and Ratnakar, Varun and
+                 Gil, Yolanda},
+      title   = {Pyleoclim: Paleoclimate Timeseries Analysis and Visualization
+                 With Python},
+      journal = {Paleoceanography and Paleoclimatology},
+      volume  = {37},
+      number  = {10},
+      pages   = {e2022PA004509},
+      year    = {2022},
+      doi     = {10.1029/2022PA004509}
+    }
+  software: pyleoclim.bib
+
+pylipd:
+  paper: |
+    @Article{mckay2016lipd,
+      author  = {McKay, Nicholas P. and Emile-Geay, Julien},
+      title   = {Technical note: {The Linked Paleo Data framework} -- a common
+                 tongue for paleoclimatology},
+      journal = {Climate of the Past},
+      volume  = {12},
+      number  = {4},
+      pages   = {1093--1100},
+      year    = {2016},
+      doi     = {10.5194/cp-12-1093-2016}
+    }
+  software: pylipd.bib
+
+pyleotups:
+  software: pyleotups.bib
+
+ammonyte:
+  software: ammonyte.bib

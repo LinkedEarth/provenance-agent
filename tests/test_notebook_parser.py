@@ -123,12 +123,7 @@ def test_parse_returns_dict():
 
 def test_parse_has_expected_keys():
     result = parse_notebook(SAMPLE)
-    assert "cell_types" in result and "libraries" in result
-
-
-def test_parse_cell_types_correct():
-    result = parse_notebook(SAMPLE)
-    assert result["cell_types"] == ["markdown", "code", "markdown", "code", "markdown", "code"]
+    assert "libraries" in result and "datasets" in result
 
 
 def test_parse_libraries_is_sorted_list():
@@ -146,11 +141,6 @@ def test_parse_libraries_contains_expected():
 # ---------------------------------------------------------------------------
 # parse_notebook — test_magic_commands.ipynb
 # ---------------------------------------------------------------------------
-
-def test_parse_magic_notebook_has_correct_cell_types():
-    result = parse_notebook(MAGIC_NB)
-    assert result["cell_types"] == ["markdown", "code", "code", "code"]
-
 
 def test_parse_magic_notebook_extracts_imports_despite_magic():
     libs = parse_notebook(MAGIC_NB)["libraries"]

@@ -1,42 +1,28 @@
 """
-notebook_parser.py
+Extracts library imports and LiPD dataset references from Jupyter Notebooks.
 
-Purpose:
-    Parses Jupyter Notebook (.ipynb) files to extract structural and dependency
-    information. Specifically, identifies the cell layout (code vs. markdown) and
-    extracts all top-level Python library imports from code cells. This feeds into
-    a broader provenance agent that generates bibliographies for data and software
-    used in scientific notebooks.
+Notebooks contain code cells with Python source, but also IPython-specific
+syntax (line magics like %matplotlib, shell commands like !pip, and cell
+magics like %%bash) that would cause ast.parse() to fail. This module first
+strips those directives, then walks the AST to collect import statements and
+calls to LiPD load methods.
 
-Implementation:
-    Uses nbformat to read .ipynb files as structured Python objects. Uses Python's
-    built-in ast (Abstract Syntax Tree) module to parse code cells and identify
-    import statements. AST parsing is preferred over regex because it correctly
-    handles multi-line imports, aliased imports, and from-imports without false
-    positives from comments or strings.
+Libraries are identified by their top-level package name (e.g. "import
+pandas as pd" yields "pandas"). Datasets are identified by finding calls
+to PyLiPD methods (load, load_remote_datasets, load_from_dir) and resolving
+their string arguments, including cases where the path is stored in a
+variable.
 
-Design Decisions:
-    - Only the top-level package name is extracted: "from matplotlib.pyplot import plt"
-      yields "matplotlib", since that is the citable unit.
-    - SyntaxError is silently skipped per cell so one malformed cell does not abort
-      the entire parse.
-    - parse_notebook() returns a dict so additional fields (e.g. data sources) can
-      be added later without breaking callers.
-    - extract_libraries() is kept separate so it can be tested or reused on arbitrary
-      code strings independently of notebook I/O.
-    - Non-Python cell magics (%%bash, %%writefile, %%html, etc.) cause the entire
-      cell to be discarded — keeping their content would produce false-positive imports
-      (e.g. an import inside a %%writefile block is written to disk, not executed).
-    - Line magics (%time, %run, etc.) drop only the %magic_name prefix and preserve
-      any trailing Python code so that `%time import pandas as pd` still yields pandas.
+The main entry point is parse_notebook(), which reads a .ipynb file via
+nbformat, processes each code cell, and returns a dict with sorted lists
+of library names and dataset names.
 """
 
 import ast
 import nbformat
 import warnings
 
-# Cell magics whose body is not Python — discard the entire cell to avoid
-# false-positive imports (e.g. imports inside %%writefile are written to disk).
+# Cell magics whose body is not Python — discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
     "bash", "sh", "shell",
     "html", "javascript", "js", "svg", "latex", "markdown",
@@ -47,14 +33,19 @@ _NON_PYTHON_CELL_MAGICS = frozenset({
 
 def strip_ipython_directives(code: str) -> str:
     """
-    @brief: Cleans a notebook code cell so ast.parse() only sees valid Python.
-            Non-Python cell magics (%%bash, %%writefile, etc.) cause the entire cell
-            to be discarded. Python cell magic headers (%%time, %%timeit, etc.) are
-            dropped but the rest of the cell is kept. Line magics (%time, %run, etc.)
-            lose only the %magic_name prefix so any trailing Python code is preserved.
-            Shell commands (!) are dropped entirely.
-    @params[in]: code - raw source string from a notebook code cell
-    @params[out]: cleaned string safe to pass to ast.parse(), or "" for non-Python cells
+    Removes IPython-specific syntax from a code cell so ast.parse() can
+    process it as valid Python.
+
+    Handles three cases: cell magics (%%bash, %%html, etc.) that make
+    the entire cell non-Python are discarded completely; line magics
+    (%matplotlib inline) keep only the argument if present; and shell
+    commands (!pip install) are removed entirely.
+
+    Args:
+        code: raw source string from a notebook code cell
+
+    Returns:
+        cleaned Python source string safe for ast.parse()
     """
     lines = code.splitlines()
     if not lines:
@@ -64,23 +55,17 @@ def strip_ipython_directives(code: str) -> str:
     if first.startswith("%%"):
         magic_name = first[2:].split()[0].lower() if first[2:].split() else ""
         if magic_name in _NON_PYTHON_CELL_MAGICS:
-            # A non-Python cell magic means the ENTIRE cell body is interpreted by
-            # that magic's handler (bash, writefile, etc.), not by Python. Dropping
-            # only the %% line and keeping the body would cause ast.parse to see
-            # non-Python content (e.g. shell commands, file contents) and either
-            # raise SyntaxError or, worse, silently extract false-positive imports
-            # from code that is never actually executed in this notebook.
             return ""
 
     cleaned = []
     for line in lines:
         s = line.lstrip()
         if s.startswith("%%"):
-            continue  # Python cell magic header — drop just this line
+            continue
         elif s.startswith("%"):
             rest = s[1:].split(None, 1)
             if len(rest) > 1:
-                cleaned.append(rest[1])  # keep inline Python after %magic_name
+                cleaned.append(rest[1])
         elif s.startswith("!"):
             continue
         else:
@@ -91,12 +76,17 @@ def strip_ipython_directives(code: str) -> str:
 
 def extract_libraries(code: str) -> set[str]:
     """
-    @brief: Parses a Python source string and returns the set of top-level package
-            names that are imported. Handles both `import X` and `from X import Y`
-            forms. Strips IPython magic and shell commands before parsing. Silently
-            skips cells that still fail to parse after stripping.
-    @params[in]: code - a string of Python source code (typically one notebook cell)
-    @params[out]: a set of strings, each a top-level package name (e.g. "matplotlib")
+    Extracts top-level package names from import statements in Python source.
+
+    Parses the code with ast and walks the tree for Import and ImportFrom
+    nodes. Only the root package is kept (e.g. "from matplotlib.pyplot"
+    yields "matplotlib"). IPython directives are stripped before parsing.
+
+    Args:
+        code: Python source string (may contain IPython syntax)
+
+    Returns:
+        set of top-level package name strings
     """
     libraries = set()
     try:
@@ -115,22 +105,132 @@ def extract_libraries(code: str) -> set[str]:
     return libraries
 
 
-def parse_notebook(path: str | None = None) -> dict:
+_LIPD_LOAD_METHODS = frozenset({"load", "load_remote_datasets", "load_from_dir"})
+
+
+def _collect_string_variables(tree: ast.AST) -> dict[str, str]:
     """
-    @brief: Reads a Jupyter Notebook file and extracts its cell structure and all
-            imported libraries across all code cells. Calls extract_libraries() on
-            each code cell and aggregates the results. When called with no argument
-            from inside a running notebook, auto-detects the current notebook path
-            via ipynbname.
-    @params[in]: path - file path string pointing to a .ipynb notebook file, or None
-                        to auto-detect the currently running notebook
-    @params[out]: a dict with two keys:
-                    'libraries' - sorted list of unique top-level package names imported
-                    'datasets'  - placeholder empty list (dataset extraction not yet implemented)
+    Collects simple variable assignments of the form name = 'string' from
+    the AST. Used to resolve variable references in LiPD load calls
+    (e.g. path = 'my_file.lpd'; lipd.load(path)).
+
+    Args:
+        tree: parsed AST of a Python source string
+
+    Returns:
+        dict mapping variable names to their string values
+    """
+    variables = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            variables[node.targets[0].id] = node.value.value
+    return variables
+
+
+def _resolve_to_strings(node: ast.AST, variables: dict[str, str]) -> list[str]:
+    """
+    Resolves an AST node to its string value(s). Handles three cases:
+    string literals, lists of strings, and variable names that were
+    previously assigned a string value.
+
+    Args:
+        node: AST node to resolve (e.g. a function argument)
+        variables: variable-to-string mapping from _collect_string_variables()
+
+    Returns:
+        list of resolved string values (empty if the node can't be resolved)
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.List):
+        result = []
+        for elt in node.elts:
+            result.extend(_resolve_to_strings(elt, variables))
+        return result
+    if isinstance(node, ast.Name) and node.id in variables:
+        return [variables[node.id]]
+    return []
+
+
+def _normalize_dataset_name(raw: str) -> str:
+    """
+    Extracts a clean dataset name from a file path, URL, or raw string.
+    Strips trailing slashes, takes the last path component, and removes
+    the .lpd extension if present.
+
+    Args:
+        raw: file path, URL, or dataset name string
+
+    Returns:
+        normalized dataset name (e.g. "http://example.com/data.lpd" -> "data")
+    """
+    name = raw.rstrip("/")
+    name = name.rsplit("/", 1)[-1] if "/" in name else name
+    if name.endswith(".lpd"):
+        name = name[:-4]
+    return name
+
+
+def extract_datasets(code: str) -> set[str]:
+    """
+    Extracts LiPD dataset names from calls to PyLiPD load methods
+    (load, load_remote_datasets, load_from_dir).
+
+    Parses the code with ast, finds method calls matching the known
+    load methods, and resolves their first argument to string values
+    (handling literals, lists, and variable references).
+
+    Args:
+        code: Python source string (may contain IPython syntax)
+
+    Returns:
+        set of normalized dataset name strings
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(strip_ipython_directives(code))
+    except SyntaxError:
+        return set()
+
+    variables = _collect_string_variables(tree)
+    datasets = set()
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _LIPD_LOAD_METHODS
+                and node.args):
+            continue
+
+        for s in _resolve_to_strings(node.args[0], variables):
+            datasets.add(_normalize_dataset_name(s))
+
+    return datasets
+
+
+def parse_notebook(path: str | None = None) -> dict[str, list[str]]:
+    """
+    Main entry point. Reads a .ipynb file and extracts all imported
+    libraries and LiPD dataset references from its code cells.
+
+    If no path is given, attempts to auto-detect the current notebook
+    path using ipynbname (must be called from inside a running notebook).
+
+    Args:
+        path: file path to a .ipynb notebook, or None for auto-detection
+
+    Returns:
+        dict with keys "libraries" and "datasets", each a sorted list
+        of strings
     """
     if path is None:
         try:
-            import ipynbname  # optional runtime dep; not in base env, so Pylance flags it as unresolved
+            import ipynbname
             path = str(ipynbname.path())
         except Exception:
             raise RuntimeError(
@@ -142,11 +242,13 @@ def parse_notebook(path: str | None = None) -> dict:
         nb = nbformat.read(f, as_version=4)
 
     libraries = set()
+    datasets = set()
     for cell in nb.cells:
         if cell.cell_type == "code":
             libraries |= extract_libraries(cell.source)
+            datasets |= extract_datasets(cell.source)
 
-    return {"libraries": sorted(libraries), "datasets": []}
+    return {"libraries": sorted(libraries), "datasets": sorted(datasets)}
 
 
 if __name__ == "__main__":
@@ -156,3 +258,4 @@ if __name__ == "__main__":
         sys.exit(1)
     result = parse_notebook(sys.argv[1])
     print("Libraries:", result["libraries"])
+    print("Datasets:", result["datasets"])
