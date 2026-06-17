@@ -122,17 +122,16 @@ def generate_bibliography(
 def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None) -> None:
     """
     Appends a bibliography as a new markdown cell at the end of a notebook.
+    Writes to the .ipynb file on disk via nbformat and also injects the
+    cell into the live notebook UI via IPython so it appears immediately
+    without a manual reload.
 
     If no path is given, attempts to auto-detect the current notebook
     path using ipynbname (must be called from inside a running notebook).
 
-    Note: this only writes to disk via nbformat. The cell won't appear
-    in an already-open VS Code/Jupyter session until the notebook is
-    reloaded. A future improvement is to also use
-    IPython.get_ipython().set_next_input() to inject the cell into the
-    live UI, then combine both disk write and UI update in one call.
-    VS Code may show a file conflict warning on save — select "Overwrite"
-    since the editor state will already match the disk.
+    Note: VS Code may show a file conflict warning on save since the
+    file was modified on disk. Select "Overwrite" — the editor state
+    will already match what was written.
 
     Args:
         bib_text: pre-generated bibliography string to insert
@@ -140,7 +139,7 @@ def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None
             auto-detection
 
     Returns:
-        None (modifies the notebook file in place)
+        None (modifies the notebook file in place and displays in UI)
     """
     if notebook_path is None:
         try:
@@ -153,15 +152,22 @@ def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None
                 "or pass an explicit notebook_path."
             )
 
+    cell_source = "## Bibliography\n\n" + bib_text
+
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
 
-    cell_source = "## Bibliography\n\n" + bib_text
     new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
     nb.cells.append(new_cell)
 
     with open(notebook_path, "w") as f:
         nbformat.write(nb, f)
+
+    try:
+        from IPython.display import display, Markdown
+        display(Markdown(cell_source))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
