@@ -1,13 +1,14 @@
 """
 Generates an APA 7th edition bibliography from library names extracted by
 notebook_parser. Looks up each library in Citations/, collects .bib entries,
-deduplicates by DOI, and renders via pandoc + the bundled apa.csl.
+deduplicates by DOI, and converts to APA via the LLM. The final output is a
+JSON-formatted Jupyter markdown cell for consumption by PaleoPAL.
 """
 
+import json
 import os
 import sys
 import yaml
-# import nbformat  # needed when add_bibliography_to_notebook is re-enabled
 from pybtex.database import parse_file, parse_string, BibliographyData
 
 
@@ -132,55 +133,29 @@ def generate_bibliography(
     return "\n\n".join(parts)
 
 
-# def add_bibliography_to_notebook(bib_text: str, notebook_path: str | None = None) -> None:
-#     """
-#     Appends a bibliography as a new markdown cell at the end of a notebook.
-#     Writes to the .ipynb file on disk via nbformat and also injects the
-#     cell into the live notebook UI via IPython so it appears immediately
-#     without a manual reload.
-#
-#     If no path is given, attempts to auto-detect the current notebook
-#     path using ipynbname (must be called from inside a running notebook).
-#
-#     Note: VS Code may show a file conflict warning on save since the
-#     file was modified on disk. Select "Overwrite" — the editor state
-#     will already match what was written.
-#
-#     Args:
-#         bib_text: pre-generated bibliography string to insert
-#         notebook_path: file path to a .ipynb notebook, or None for
-#             auto-detection
-#
-#     Returns:
-#         None (modifies the notebook file in place and displays in UI)
-#     """
-#     if notebook_path is None:
-#         try:
-#             import ipynbname
-#             notebook_path = str(ipynbname.path())
-#         except Exception:
-#             raise RuntimeError(
-#                 "Could not auto-detect the current notebook path. "
-#                 "Install ipynbname (`pip install ipynbname`) and call from inside a running notebook, "
-#                 "or pass an explicit notebook_path."
-#             )
-#
-#     cell_source = "## Bibliography\n\n" + bib_text
-#
-#     with open(notebook_path) as f:
-#         nb = nbformat.read(f, as_version=4)
-#
-#     new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
-#     nb.cells.append(new_cell)
-#
-#     with open(notebook_path, "w") as f:
-#         nbformat.write(nb, f)
-#
-#     try:
-#         from IPython.display import display, Markdown
-#         display(Markdown(cell_source))
-#     except Exception:
-#         pass
+def generate_bibliography_cell(
+    libraries: list[str],
+    citation_types: list[str] | None = None,
+) -> str:
+    """
+    Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
+    This is the final step in the software pipeline — the returned JSON string
+    can be parsed and appended to a notebook's cell list.
+
+    Args:
+        libraries: list of library name strings
+        citation_types: optional filter — "paper" and/or "software"
+
+    Returns:
+        JSON string representing a notebook markdown cell with the bibliography
+    """
+    bib_text = generate_bibliography(libraries, citation_types)
+    cell = {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [f"## Bibliography\n\n{bib_text}"],
+    }
+    return json.dumps(cell, indent=2)
 
 
 if __name__ == "__main__":
