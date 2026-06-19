@@ -24,3 +24,8 @@ def bibtex_to_apa(bibtex: str) -> str:
     """Converts a BibTeX entry to an APA 7th edition citation string."""
     response = bibtex_to_apa_chain.invoke({"bibtex": bibtex})
     return response.content
+
+
+#wrap it in langchain
+#sequential chain with 1. parse.py, 2 create bib(entries), 3. return JSON object of the markdown cell with the formatted citation
+# return JSON object of the markdown cell with the formatted citation

@@ -1,6 +1,6 @@
-## Maps each library to its paper citation (static — never changes).
-## Software citations live at Citations/{library}.bib and are looked up by filename.
-## Not all libraries have a paper citation.
+## Maps each library to its paper citation and software citation file.
+## Paper citations are inlined as BibTeX; software citations reference .bib files.
+## Not all libraries have both citation types.
 
 pandas:
   paper: |
@@ -13,6 +13,7 @@ pandas:
       editor    = {St\'efan van der Walt and Jarrod Millman},
       doi       = {10.25080/Majora-92bf1922-00a}
     }
+  software: pandas.bib
 
 numpy:
   paper: |
@@ -54,6 +55,7 @@ matplotlib:
       doi       = {10.1109/MCSE.2007.55},
       year      = 2007
     }
+  software: matplotlib.bib
 
 xarray:
   paper: |
@@ -69,8 +71,10 @@ xarray:
       doi       = {10.5334/jors.148},
       url       = {https://doi.org/10.5334/jors.148}
     }
+  software: xarray.bib
 
 cartopy:
+  software: cartopy.bib
 
 pyleoclim:
   paper: |
@@ -87,6 +91,7 @@ pyleoclim:
       year    = {2022},
       doi     = {10.1029/2022PA004509}
     }
+  software: pyleoclim.bib
 
 pylipd:
   paper: |
@@ -101,7 +106,10 @@ pylipd:
       year    = {2016},
       doi     = {10.5194/cp-12-1093-2016}
     }
+  software: pylipd.bib
 
 pyleotups:
+  software: pyleotups.bib
 
 ammonyte:
+  software: ammonyte.bib
