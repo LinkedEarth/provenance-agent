@@ -1,8 +1,12 @@
 """
-Generates an APA 7th edition bibliography from library names extracted by
-notebook_parser. Looks up each library in Citations/, collects .bib entries,
-deduplicates by DOI, and converts to APA via the LLM. The final output is a
-JSON-formatted Jupyter markdown cell for consumption by PaleoPAL.
+Generates an APA 7th edition bibliography from a parsed notebook result.
+Handles three citation sources:
+  - Software libraries: looked up in Citations/ YAML and .bib files
+  - LiPD datasets: fetched via PyLiPD's get_bibtex()
+  - PyleoTUPS datasets: fetched via PyleoTUPS's get_publications()
+
+All citations are deduplicated by DOI, converted to APA via the LLM,
+and returned as a JSON-formatted Jupyter markdown cell for PaleoPAL.
 """
 
 import json
@@ -24,12 +28,7 @@ def load_citation_index() -> dict:
 
 
 def _add_entries(source: BibliographyData, dest: BibliographyData, seen_dois: set) -> None:
-    """Merges entries from source into dest, deduplicating by DOI.
-
-    Deduplication is not needed with the current hardcoded citations,
-    but will matter when citations are fetched from the web where
-    duplicate DOIs could appear.
-    """
+    """Merges entries from source into dest, deduplicating by DOI."""
     for key, entry in source.entries.items():
         doi = entry.fields.get("doi", "")
         if doi and doi in seen_dois:
@@ -39,7 +38,7 @@ def _add_entries(source: BibliographyData, dest: BibliographyData, seen_dois: se
         dest.entries[key] = entry
 
 
-def collect_entries(
+def collect_library_entries(
     libraries: list[str],
     citation_types: list[str] | None = None,
 ) -> BibliographyData:
@@ -72,20 +71,13 @@ def collect_entries(
     return merged
 
 
-# def render_apa(bib_data: BibliographyData) -> str:
-#     """
-#     Placeholder: returns raw BibTeX instead of APA.
-#     """
-#     return bib_data.to_string(bib_format="bibtex").strip()
-
-
 def render_apa(bib_data: BibliographyData) -> str:
     """
     Converts BibliographyData to APA 7th edition plain text by sending
-    each BibTeX entry through the LLM via langchain.bibtex_to_apa().
+    each BibTeX entry through the LLM.
 
     Args:
-        bib_data: collected BibTeX entries from collect_entries()
+        bib_data: collected BibTeX entries
 
     Returns:
         APA-formatted citation string with entries separated by blank lines
@@ -102,54 +94,96 @@ def render_apa(bib_data: BibliographyData) -> str:
     return "\n\n".join(citations)
 
 
+def _render_apa_from_strings(bibtex_strings: list[str]) -> str:
+    """
+    Converts raw BibTeX strings to APA via the LLM.
+    Used for dataset citations from PyLiPD and PyleoTUPS.
+
+    Args:
+        bibtex_strings: list of BibTeX entry strings
+
+    Returns:
+        APA-formatted citation string with entries separated by blank lines
+    """
+    from llm import bibtex_to_apa
+
+    citations = []
+    for bibtex_str in bibtex_strings:
+        apa = bibtex_to_apa(bibtex_str.strip())
+        citations.append(apa)
+
+    return "\n\n".join(citations)
+
+
 def generate_bibliography(
-    libraries: list[str],
+    parse_result: dict,
     citation_types: list[str] | None = None,
 ) -> str:
     """
-    Produces a bibliography string for a list of library names.
+    Produces a bibliography string from a parse_notebook() result.
+    Collects library citations from local files, fetches dataset
+    citations from PyLiPD and PyleoTUPS, and converts everything to APA.
 
     Args:
-        libraries: list of library name strings
-        citation_types: optional filter — "paper" and/or "software"
+        parse_result: dict returned by parse_notebook()
+        citation_types: optional filter for library citations —
+            "paper" and/or "software". Does not affect dataset citations.
 
     Returns:
-        formatted bibliography string with citations and placeholders
-        for libraries not found in the citation index
+        formatted bibliography string
     """
+    from pylipd_helper import fetch_lipd_citations
+    from pyleotups_helper import fetch_pyleotups_citations
+
+    parts = []
+
+    # Library citations
+    libraries = parse_result["libraries"]
     index = load_citation_index()
-    entries = collect_entries(libraries, citation_types)
+    entries = collect_library_entries(libraries, citation_types)
+
+    if entries.entries:
+        parts.append(render_apa(entries))
 
     not_found = [lib for lib in libraries
                  if lib.lower() not in index and lib not in _STDLIB_MODULES]
-
-    parts = []
-    if entries.entries:
-        parts.append(render_apa(entries))
     if not_found:
-        placeholders = "\n".join(f"[No citation found for: {lib}]" for lib in not_found)
-        parts.append(placeholders)
+        parts.append("\n".join(f"[No citation found for: {lib}]" for lib in not_found))
+
+    # LiPD dataset citations
+    lipd = parse_result.get("_lipd", {})
+    if lipd.get("names") or lipd.get("directories"):
+        bibtex_list, _ = fetch_lipd_citations(**lipd)
+        if bibtex_list:
+            parts.append(_render_apa_from_strings(bibtex_list))
+
+    # PyleoTUPS dataset citations
+    pyleotups = parse_result.get("_pyleotups", {})
+    if pyleotups.get("pangaea") or pyleotups.get("noaa"):
+        bibtex_list = fetch_pyleotups_citations(pyleotups)
+        if bibtex_list:
+            parts.append(_render_apa_from_strings(bibtex_list))
 
     return "\n\n".join(parts)
 
 
 def generate_bibliography_cell(
-    libraries: list[str],
+    parse_result: dict,
     citation_types: list[str] | None = None,
 ) -> str:
     """
     Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
-    This is the final step in the software pipeline — the returned JSON string
-    can be parsed and appended to a notebook's cell list.
+    This is the final step in the pipeline — the returned JSON string
+    can be parsed and appended to a notebook's cell list by PaleoPAL.
 
     Args:
-        libraries: list of library name strings
-        citation_types: optional filter — "paper" and/or "software"
+        parse_result: dict returned by parse_notebook()
+        citation_types: optional filter for library citations
 
     Returns:
         JSON string representing a notebook markdown cell with the bibliography
     """
-    bib_text = generate_bibliography(libraries, citation_types)
+    bib_text = generate_bibliography(parse_result, citation_types)
     cell = {
         "cell_type": "markdown",
         "metadata": {},
@@ -168,5 +202,5 @@ if __name__ == "__main__":
 
     notebook_path = sys.argv[1]
     result = parse_notebook(notebook_path)
-    bib_text = generate_bibliography(result["libraries"])
+    bib_text = generate_bibliography(result)
     print(bib_text)
