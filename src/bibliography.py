@@ -1,12 +1,14 @@
 """
 Generates an APA 7th edition bibliography from a parsed notebook result.
-Handles three citation sources:
-  - Software libraries: looked up in Citations/ YAML and .bib files
-  - LiPD datasets: fetched via PyLiPD's get_bibtex()
-  - PyleoTUPS datasets: fetched via PyleoTUPS's get_publications()
+Handles two citation categories:
+  - Software libraries: looked up in Citations/ YAML and .bib files,
+    converted to APA via the LLM
+  - Datasets: not fetched here — parse_notebook() returns a datasets list
+    with actionable instructions for the PaleoPAL Code Agent (PyLiPD,
+    PyleoTUPS) and SPARQL Agent (LiPDGraph) to retrieve citations
 
-All citations are deduplicated by DOI, converted to APA via the LLM,
-and returned as a JSON-formatted Jupyter markdown cell for PaleoPAL.
+All library citations are deduplicated by DOI. The final bibliography
+is returned as a JSON-formatted Jupyter markdown cell for PaleoPAL.
 """
 
 import json
@@ -118,23 +120,25 @@ def _render_apa_from_strings(bibtex_strings: list[str]) -> str:
 def generate_bibliography(
     parse_result: dict,
     citation_types: list[str] | None = None,
+    dataset_bibtex: list[str] | None = None,
 ) -> str:
     """
     Produces a bibliography string from a parse_notebook() result.
-    Collects library citations from local files, fetches dataset
-    citations from PyLiPD and PyleoTUPS, and converts everything to APA.
+    Collects library citations from local YAML/.bib files and converts
+    to APA. Dataset citations are not fetched here — they come from the
+    Code Agent or SPARQL Agent and are passed in via dataset_bibtex.
 
     Args:
         parse_result: dict returned by parse_notebook()
         citation_types: optional filter for library citations —
-            "paper" and/or "software". Does not affect dataset citations.
+            "paper" and/or "software"
+        dataset_bibtex: optional list of BibTeX strings for dataset
+            citations, provided by the Code Agent / SPARQL Agent after
+            executing the actions in parse_result["datasets"]
 
     Returns:
         formatted bibliography string
     """
-    from pylipd_helper import fetch_lipd_citations
-    from pyleotups_helper import fetch_pyleotups_citations
-
     parts = []
 
     # Library citations
@@ -150,19 +154,9 @@ def generate_bibliography(
     if not_found:
         parts.append("\n".join(f"[No citation found for: {lib}]" for lib in not_found))
 
-    # LiPD dataset citations
-    lipd = parse_result.get("_lipd", {})
-    if lipd.get("names") or lipd.get("directories"):
-        bibtex_list, _ = fetch_lipd_citations(**lipd)
-        if bibtex_list:
-            parts.append(_render_apa_from_strings(bibtex_list))
-
-    # PyleoTUPS dataset citations
-    pyleotups = parse_result.get("_pyleotups", {})
-    if pyleotups.get("pangaea") or pyleotups.get("noaa"):
-        bibtex_list = fetch_pyleotups_citations(pyleotups)
-        if bibtex_list:
-            parts.append(_render_apa_from_strings(bibtex_list))
+    # Dataset citations (provided by agents)
+    if dataset_bibtex:
+        parts.append(_render_apa_from_strings(dataset_bibtex))
 
     return "\n\n".join(parts)
 
@@ -170,6 +164,7 @@ def generate_bibliography(
 def generate_bibliography_cell(
     parse_result: dict,
     citation_types: list[str] | None = None,
+    dataset_bibtex: list[str] | None = None,
 ) -> str:
     """
     Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
@@ -179,11 +174,13 @@ def generate_bibliography_cell(
     Args:
         parse_result: dict returned by parse_notebook()
         citation_types: optional filter for library citations
+        dataset_bibtex: optional list of BibTeX strings for dataset
+            citations, provided by the Code Agent / SPARQL Agent
 
     Returns:
         JSON string representing a notebook markdown cell with the bibliography
     """
-    bib_text = generate_bibliography(parse_result, citation_types)
+    bib_text = generate_bibliography(parse_result, citation_types, dataset_bibtex)
     cell = {
         "cell_type": "markdown",
         "metadata": {},

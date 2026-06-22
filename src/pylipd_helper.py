@@ -12,6 +12,67 @@ import warnings
 
 
 _LIPD_LOAD_METHODS = frozenset({"load", "load_remote_datasets", "load_from_dir"})
+_LIPD_CLASS_NAMES = frozenset({"LiPD"})
+
+
+def extract_lipd_objects(code: str) -> dict[str, str]:
+    """
+    Finds LiPD dataset variable names that are actively used for analysis.
+
+    Tracks constructor assignments (D = LiPD()) and detects when one object
+    is consumed into another via load_datasets() (e.g.
+    D.load_datasets(D_other.get_datasets())). Consumed objects are excluded
+    — only terminal objects are returned.
+
+    Expects the full concatenated notebook code (all cells) so it can trace
+    data flow across cells.
+
+    Args:
+        code: full pre-cleaned Python source from all notebook cells
+
+    Returns:
+        dict mapping variable name to "LiPD" for active dataset objects,
+        e.g. {"D": "LiPD", "D_dir": "LiPD"}
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(code)
+    except SyntaxError:
+        return {}
+
+    all_objects: dict[str, str] = {}
+    consumed: set[str] = set()
+
+    for node in tree.body:
+        # D = LiPD() — constructor via direct call or attribute access
+        if (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Call)):
+            var_name = node.targets[0].id
+            func = node.value.func
+            if ((isinstance(func, ast.Name) and func.id in _LIPD_CLASS_NAMES)
+                    or (isinstance(func, ast.Attribute)
+                        and func.attr in _LIPD_CLASS_NAMES)):
+                all_objects[var_name] = "LiPD"
+
+        # D.load_datasets(D_other.get_datasets()) — consumption pattern
+        if (isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "load_datasets"
+                and node.value.args):
+            arg = node.value.args[0]
+            # The arg is typically D_other.get_datasets()
+            if (isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Attribute)
+                    and arg.func.attr == "get_datasets"
+                    and isinstance(arg.func.value, ast.Name)
+                    and arg.func.value.id in all_objects):
+                consumed.add(arg.func.value.id)
+
+    return {name: cls for name, cls in all_objects.items() if name not in consumed}
 
 
 def _collect_string_variables(tree: ast.AST) -> dict[str, str]:

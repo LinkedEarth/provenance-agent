@@ -17,6 +17,63 @@ import warnings
 _PANGAEA_KWARGS = frozenset({"study_ids"})
 _NOAA_KWARGS = frozenset({"noaa_id", "xml_id"})
 
+_PYLEOTUPS_CLASSES = frozenset({"PangaeaDataset", "NOAADataset"})
+
+
+def extract_pyleotups_objects(code: str) -> dict[str, str]:
+    """
+    Finds PyleoTUPS dataset variable names that are actively used for analysis.
+
+    Tracks constructor assignments (ds = pt.PangaeaDataset()) and combination
+    operations (ds3 = ds1 + ds2). Variables consumed by a combination are
+    excluded — only terminal objects are returned.
+
+    Expects the full concatenated notebook code (all cells) so it can trace
+    data flow across cells.
+
+    Args:
+        code: full pre-cleaned Python source from all notebook cells
+
+    Returns:
+        dict mapping variable name to class name for active dataset objects,
+        e.g. {"ds": "PangaeaDataset", "ds_sum": "combined"}
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(code)
+    except SyntaxError:
+        return {}
+
+    all_objects: dict[str, str] = {}
+    consumed: set[str] = set()
+
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            continue
+
+        var_name = node.targets[0].id
+        value = node.value
+
+        if (isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and value.func.attr in _PYLEOTUPS_CLASSES):
+            all_objects[var_name] = value.func.attr
+
+        elif (isinstance(value, ast.BinOp)
+              and isinstance(value.op, ast.Add)
+              and isinstance(value.left, ast.Name)
+              and isinstance(value.right, ast.Name)
+              and value.left.id in all_objects
+              and value.right.id in all_objects):
+            consumed.add(value.left.id)
+            consumed.add(value.right.id)
+            all_objects[var_name] = "combined"
+
+    return {name: cls for name, cls in all_objects.items() if name not in consumed}
+
 
 def _collect_int_variables(tree: ast.AST) -> dict[str, int]:
     """Tracks simple name = integer assignments for variable resolution."""

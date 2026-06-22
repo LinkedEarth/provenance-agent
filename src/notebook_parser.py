@@ -1,14 +1,17 @@
 """
 Parses Jupyter Notebook (.ipynb) files to extract library imports and
-dataset references. Uses nbformat for notebook I/O and ast for code
-analysis. Delegates dataset extraction to pylipd_helper and pyleotups_helper.
+dataset sources. Uses nbformat for notebook I/O and ast for code analysis.
+Delegates dataset object detection to pylipd_helper, pyleotups_helper, and
+lipdgraph_helper. Output is structured as actionable instructions for the
+PaleoPAL Code Agent and SPARQL Agent.
 """
 
 import ast
 import nbformat
 import warnings
-from pylipd_helper import extract_datasets
-from pyleotups_helper import extract_pyleotups_ids
+from pylipd_helper import extract_lipd_objects
+from pyleotups_helper import extract_pyleotups_objects
+from lipdgraph_helper import detect_lipdgraph_queries
 
 # Cell magics whose body is not Python — discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
@@ -86,12 +89,60 @@ def validate_libraries(requested: list[str], available: list[str]) -> tuple[list
     return found, not_found
 
 
+def _build_datasets(
+    lipd_objects: dict[str, str],
+    pyleotups_objects: dict[str, str],
+    lipdgraph: dict | None,
+) -> list[dict]:
+    """
+    Converts raw detection results into a unified list of dataset actions.
+
+    Each entry tells the provenance agent which agent to call, which
+    variable to reference, and what action to take to retrieve citations.
+
+    Args:
+        lipd_objects: {var_name: "LiPD"} from extract_lipd_objects()
+        pyleotups_objects: {var_name: class_name} from extract_pyleotups_objects()
+        lipdgraph: dict from detect_lipdgraph_queries(), or None
+
+    Returns:
+        list of dataset action dicts
+    """
+    datasets = []
+
+    for var, cls in lipd_objects.items():
+        datasets.append({
+            "variable": var,
+            "source_type": "PyLiPD",
+            "agent": "code",
+            "action": f"{var}.get_bibtex(remote=True)",
+        })
+
+    for var, cls in pyleotups_objects.items():
+        datasets.append({
+            "variable": var,
+            "source_type": "PyleoTUPS",
+            "class": cls,
+            "agent": "code",
+            "action": f"{var}.get_publications()",
+        })
+
+    if lipdgraph and lipdgraph.get("result_var"):
+        datasets.append({
+            "variable": lipdgraph["result_var"],
+            "source_type": "LiPDGraph",
+            "agent": "sparql",
+            "endpoint": lipdgraph["endpoint"],
+        })
+
+    return datasets
+
+
 def parse_notebook(path: str | None = None) -> dict:
     """
     Reads a .ipynb file and returns its imported libraries and dataset
-    references. Dataset details (LiPD names/dirs, PyleoTUPS PANGAEA/NOAA
-    IDs) are kept in internal structures that the fetch functions in
-    each helper know how to consume.
+    sources. Each dataset entry is an actionable instruction: which agent
+    to call, which variable to reference, and what to do to get citations.
 
     Args:
         path: path to a .ipynb file, or None to auto-detect
@@ -99,8 +150,12 @@ def parse_notebook(path: str | None = None) -> dict:
     Returns:
         dict with:
             libraries: sorted list of imported library names
-            _lipd: internal dict for pylipd_helper.fetch_lipd_citations()
-            _pyleotups: internal dict for pyleotups_helper.fetch_pyleotups_citations()
+            datasets: list of dataset action dicts, each with:
+                - variable: the object name in the notebook
+                - source_type: "PyLiPD", "PyleoTUPS", or "LiPDGraph"
+                - agent: "code" or "sparql"
+                - action: the function call string (code agent)
+                - endpoint: the SPARQL endpoint URL (sparql agent)
     """
     if path is None:
         try:
@@ -116,30 +171,25 @@ def parse_notebook(path: str | None = None) -> dict:
         nb = nbformat.read(f, as_version=4)
 
     libraries = set()
-    lipd_names = set()
-    lipd_dirs = set()
-    pyleotups_ids = {"pangaea": [], "noaa": []}
+    all_cleaned_code = []
 
     for cell in nb.cells:
         if cell.cell_type == "code":
             cleaned = strip_ipython_directives(cell.source)
             libraries |= extract_libraries(cell.source)
+            all_cleaned_code.append(cleaned)
 
-            cell_datasets = extract_datasets(cleaned)
-            lipd_names |= cell_datasets["names"]
-            lipd_dirs |= cell_datasets["directories"]
+    full_code = "\n".join(all_cleaned_code)
 
-            cell_ids = extract_pyleotups_ids(cleaned)
-            pyleotups_ids["pangaea"].extend(cell_ids["pangaea"])
-            pyleotups_ids["noaa"].extend(cell_ids["noaa"])
-
-    pyleotups_ids["pangaea"] = sorted(set(pyleotups_ids["pangaea"]))
-    pyleotups_ids["noaa"] = sorted(set(pyleotups_ids["noaa"]))
+    datasets = _build_datasets(
+        lipd_objects=extract_lipd_objects(full_code),
+        pyleotups_objects=extract_pyleotups_objects(full_code),
+        lipdgraph=detect_lipdgraph_queries(full_code),
+    )
 
     return {
         "libraries": sorted(libraries),
-        "_lipd": {"names": sorted(lipd_names), "directories": sorted(lipd_dirs)},
-        "_pyleotups": pyleotups_ids,
+        "datasets": datasets,
     }
 
 
@@ -150,5 +200,7 @@ if __name__ == "__main__":
         sys.exit(1)
     result = parse_notebook(sys.argv[1])
     print("Libraries:", result["libraries"])
-    print("LiPD:", result["_lipd"])
-    print("PyleoTUPS:", result["_pyleotups"])
+    print("Datasets:")
+    for ds in result["datasets"]:
+        print(f"  [{ds['agent']}] {ds['variable']} ({ds['source_type']})"
+              + (f" → {ds['action']}" if "action" in ds else ""))
