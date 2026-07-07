@@ -138,6 +138,28 @@ def _build_datasets(
     return datasets
 
 
+def read_notebook_code(path: str) -> str:
+    """
+    Reads a .ipynb file and returns all code cells concatenated into one string,
+    with IPython directives (magics, shell lines) stripped so the result is
+    valid Python. Used by the LLM dataset detector, which reasons over the full
+    notebook source.
+
+    Args:
+        path: path to a .ipynb file
+
+    Returns:
+        the notebook's code cells joined by newlines, directives removed
+    """
+    with open(path) as f:
+        nb = nbformat.read(f, as_version=4)
+    return "\n".join(
+        strip_ipython_directives(cell.source)
+        for cell in nb.cells
+        if cell.cell_type == "code"
+    )
+
+
 def parse_notebook(path: str | None = None) -> dict:
     """
     Reads a .ipynb file and returns its imported libraries and dataset
