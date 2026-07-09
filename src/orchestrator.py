@@ -74,3 +74,36 @@ def cite_software(
         notes = "\n".join(f"[Not imported in notebook: {lib}]" for lib in not_found)
         body = f"{body}\n\n{notes}" if body else notes
     return body
+
+
+def cite_data(
+    notebook_path: str,
+    targets=None,
+    fmt: str = "apa",
+    output_path: str | None = None,
+) -> list[list[str]]:
+    """
+    Cites the datasets a notebook uses by injecting a retrieval cell per dataset.
+
+    Detection is static (works even if the notebook was never run), but retrieval
+    reuses the live kernel objects, so the citations appear as the injected
+    cells' OUTPUT when the user runs them - not as this function's return value.
+
+    Args:
+        notebook_path: path to the .ipynb to analyze and modify
+        targets: None (all detected datasets), a single variable name, or a list
+        fmt: "apa" (default) or "bibtex"
+        output_path: where to write the modified notebook (defaults to in place)
+
+    Returns:
+        the [variable, tool] pairs that had retrieval cells injected
+    """
+    _check_fmt(fmt)
+    from data_workflow import generate_data_workflow
+
+    return generate_data_workflow(
+        notebook_path,
+        variable=targets,
+        output_path=output_path,
+        fmt=fmt,
+    )
