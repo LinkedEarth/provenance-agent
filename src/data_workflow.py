@@ -8,22 +8,28 @@ Purpose:
     notebook with nbformat. The cells are meant to run in the notebook's own
     kernel, where the already-loaded objects (LiPD objects, PyleoTUPS datasets,
     the LiPDGraph result DataFrame) are reused - no re-querying or re-loading.
+    The fmt parameter controls whether cells output raw BibTeX or render it to
+    APA format.
 
 Implementation:
     - extract_lipdgraph_endpoint(code): AST-scans the notebook for the
       LinkedEarth graph endpoint URL (the string passed to requests.post), so
       the LiPDGraph pathway loads from the same repository the notebook queried.
-    - build_retrieval_cell(variable, tool, endpoint): returns the Python source
-      for one dataset's retrieval cell. PyLiPD/PyleoTUPS call the library method
-      directly on the in-memory object (Approach C: {var}.{method}). LiPDGraph is
-      special: the terminal variable is a DataFrame, so the cell pulls its
-      dataSetName column, loads those datasets into a fresh LiPD object from the
-      endpoint, then calls get_bibtex().
+    - build_retrieval_cell(variable, tool, endpoint, fmt): returns the Python
+      source for one dataset's retrieval cell. PyLiPD/PyleoTUPS call the library
+      method directly on the in-memory object (Approach C: {var}.{method}).
+      LiPDGraph is special: the terminal variable is a DataFrame, so the cell
+      pulls its dataSetName column, loads those datasets into a fresh LiPD object
+      from the endpoint, then calls get_bibtex(). When fmt="apa", the cell pipes
+      the collected BibTeX to bibliography.render_bibtex_strings_to_apa() for
+      APA rendering in-kernel.
     - filter_datasets(pairs, tool, variable): narrows the detected pairs so the
       workflow can cite all datasets, only one tool's datasets, or one variable.
-    - inject_retrieval_cells(nb, pairs, endpoint): appends one retrieval code
-      cell per pair to an nbformat notebook node.
-    - generate_data_workflow(...): top-level glue - detect, filter, inject, write.
+    - inject_retrieval_cells(nb, pairs, endpoint, fmt): appends one retrieval code
+      cell per pair to an nbformat notebook node. fmt defaults to "bibtex" and
+      accepts "apa" to render citations in APA format.
+    - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject,
+      write. fmt defaults to "bibtex" and can be "apa" for APA-formatted output.
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
@@ -33,6 +39,8 @@ Design decisions:
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
+    - APA rendering happens in the injected cell (via render_bibtex_strings_to_apa)
+      so the user can see formatted citations as output without re-running code.
 """
 
 import ast

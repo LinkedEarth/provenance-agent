@@ -20,8 +20,10 @@ Implementation:
 Design decisions:
     - fmt defaults to "apa" (the finished product is a human-readable
       bibliography); fmt="bibtex" skips the Gemini call for the raw artifact.
-    - Heavy imports (notebook_parser, bibliography, data_workflow) are deferred
-      into the functions so importing this module stays cheap and side-effect free.
+    - Workflow modules (notebook_parser, bibliography, data_workflow) are
+      deferred into the functions so importing this module stays cheap. LangChain
+      StructuredTool is imported at module level to build the tool instances at
+      import time (needed for agent routing).
 """
 
 _VALID_FMT = ("apa", "bibtex")
