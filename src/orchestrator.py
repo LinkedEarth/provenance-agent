@@ -107,3 +107,30 @@ def cite_data(
         output_path=output_path,
         fmt=fmt,
     )
+
+
+from langchain_core.tools import StructuredTool
+
+cite_software_tool = StructuredTool.from_function(
+    func=cite_software,
+    name="cite_software",
+    description=(
+        "Cite the software libraries a Jupyter notebook imports. Use this for "
+        "requests about citing software, packages, or libraries. Pass "
+        "`notebook_path`; optionally `libraries` (a name or list to cite only "
+        "those), `citation_types` ('paper' and/or 'software'), and `fmt` "
+        "('apa' default, or 'bibtex')."
+    ),
+)
+
+cite_data_tool = StructuredTool.from_function(
+    func=cite_data,
+    name="cite_data",
+    description=(
+        "Cite the datasets a Jupyter notebook uses (PyLiPD, PyleoTUPS, or "
+        "LiPDGraph). Use this for requests about citing data or datasets. Pass "
+        "`notebook_path`; optionally `targets` (a variable name or list to cite "
+        "only those) and `fmt` ('apa' default, or 'bibtex'). This injects a "
+        "retrieval cell per dataset; the user runs it to produce the citation."
+    ),
+)

@@ -85,3 +85,28 @@ def test_cite_data_rejects_bad_fmt(tmp_path):
     from orchestrator import cite_data
     with pytest.raises(ValueError):
         cite_data(str(tmp_path / "x.ipynb"), fmt="html")
+
+
+def test_tools_are_structured_tools():
+    from langchain_core.tools import StructuredTool
+    from orchestrator import cite_software_tool, cite_data_tool
+    assert isinstance(cite_software_tool, StructuredTool)
+    assert isinstance(cite_data_tool, StructuredTool)
+
+
+def test_tool_names_and_descriptions():
+    from orchestrator import cite_software_tool, cite_data_tool
+    assert cite_software_tool.name == "cite_software"
+    assert cite_data_tool.name == "cite_data"
+    assert "software" in cite_software_tool.description.lower()
+    assert "dataset" in cite_data_tool.description.lower()
+
+
+def test_cite_software_tool_invokes(monkeypatch):
+    import bibliography
+    monkeypatch.setattr(bibliography, "render_apa", lambda entries: "APA_SENTINEL")
+    from orchestrator import cite_software_tool
+    out = cite_software_tool.invoke(
+        {"notebook_path": SAMPLE, "libraries": "pyleoclim", "fmt": "apa"}
+    )
+    assert out.startswith("APA_SENTINEL")
