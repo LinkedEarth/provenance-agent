@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+# gemini-flash-latest is an alias that tracks the current Gemini Flash model, so
+# a specific version being retired does not 404 us (gemini-2.5-flash was retired).
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
 bibtex_to_apa_prompt = ChatPromptTemplate.from_template(
     "Convert this BibTeX entry to APA 7th edition format. "

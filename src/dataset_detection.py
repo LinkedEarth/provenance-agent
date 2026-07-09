@@ -21,8 +21,8 @@ Implementation:
     - detect_datasets_in_notebook(path): reads a .ipynb into code, then detects.
 
 Design decisions:
-    - Reuses the Gemini model configured in src/llm.py (gemini-2.5-flash,
-      temperature=0) so detection is as deterministic as the API allows and the
+    - Reuses the Gemini model configured in src/llm.py (temperature=0) so
+      detection is as deterministic as the API allows and the
       credential/config lives in one place. That import is deferred into
       detect_datasets() so the pure helpers can be imported and unit-tested
       without a GOOGLE_API_KEY or network access.
