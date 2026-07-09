@@ -1,6 +1,21 @@
 """
-LangChain agent wrapper for citation formatting. Uses Gemini to convert
-BibTeX entries into APA 7th edition citations.
+Shared Gemini client for the whole project.
+
+Purpose:
+    One place to configure the LLM and credentials. Every LLM call routes through
+    the single `llm` object defined here, so the model, temperature, and API key
+    live in exactly one spot.
+
+Consumers:
+    - dataset_detection.py imports `llm` for LLM-based dataset detection.
+    - bibliography.py imports `bibtex_to_apa` for APA rendering.
+    - agent.py imports `llm` for bind_tools natural-language routing.
+
+Implementation:
+    - Loads GOOGLE_API_KEY from src/.env via dotenv.
+    - `llm`: a ChatGoogleGenerativeAI client (temperature=0 for determinism).
+    - `bibtex_to_apa(bibtex)`: a prompt | llm chain that converts one BibTeX
+      entry to an APA 7th edition string.
 """
 
 import os
@@ -26,8 +41,3 @@ def bibtex_to_apa(bibtex: str) -> str:
     """Converts a BibTeX entry to an APA 7th edition citation string."""
     response = bibtex_to_apa_chain.invoke({"bibtex": bibtex})
     return response.content
-
-
-#wrap it in langchain
-#sequential chain with 1. parse.py, 2 create bib(entries), 3. return JSON object of the markdown cell with the formatted citation
-# return JSON object of the markdown cell with the formatted citation
