@@ -37,7 +37,7 @@ def _check_fmt(fmt: str) -> None:
 
 def cite_software(
     notebook_path: str,
-    libraries=None,
+    libraries: str | list[str] | None = None,
     citation_types: list[str] | None = None,
     fmt: str = "apa",
 ) -> str:
@@ -80,7 +80,7 @@ def cite_software(
 
 def cite_data(
     notebook_path: str,
-    targets=None,
+    targets: str | list[str] | None = None,
     fmt: str = "apa",
     output_path: str | None = None,
 ) -> list[list[str]]:

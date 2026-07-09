@@ -103,7 +103,9 @@ def build_retrieval_cell(
             (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
             when None.
         fmt: "bibtex" (default) prints the raw BibTeX; "apa" renders it to APA
-            in-kernel via bibliography.render_bibtex_strings_to_apa.
+            in-kernel via bibliography.render_bibtex_strings_to_apa. When
+            fmt="apa", the injected cell imports from bibliography, so src/ must
+            be on the kernel's sys.path for the import to succeed.
 
     Returns:
         Python source that, run in the notebook's kernel, prints the dataset's
@@ -200,7 +202,7 @@ def inject_retrieval_cells(
 def generate_data_workflow(
     notebook_path: str,
     tool: str | None = None,
-    variable: str | None = None,
+    variable: str | list[str] | None = None,
     output_path: str | None = None,
     fmt: str = "bibtex",
 ) -> list[list[str]]:
