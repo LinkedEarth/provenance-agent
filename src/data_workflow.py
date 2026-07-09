@@ -10,35 +10,75 @@ Purpose:
     the LiPDGraph result DataFrame) are reused - no re-querying or re-loading.
 
 Implementation:
-    - build_retrieval_cell(variable, tool): returns the Python source for one
-      dataset's retrieval cell. PyLiPD/PyleoTUPS call the library method directly
-      on the in-memory object (Approach C: {var}.{method}). LiPDGraph is special:
-      the terminal variable is a DataFrame, so the cell pulls its dataSetName
-      column, loads those datasets into a fresh LiPD object from the LiPDVerse
+    - extract_lipdgraph_endpoint(code): AST-scans the notebook for the
+      LinkedEarth graph endpoint URL (the string passed to requests.post), so
+      the LiPDGraph pathway loads from the same repository the notebook queried.
+    - build_retrieval_cell(variable, tool, endpoint): returns the Python source
+      for one dataset's retrieval cell. PyLiPD/PyleoTUPS call the library method
+      directly on the in-memory object (Approach C: {var}.{method}). LiPDGraph is
+      special: the terminal variable is a DataFrame, so the cell pulls its
+      dataSetName column, loads those datasets into a fresh LiPD object from the
       endpoint, then calls get_bibtex().
     - filter_datasets(pairs, tool, variable): narrows the detected pairs so the
       workflow can cite all datasets, only one tool's datasets, or one variable.
-    - inject_retrieval_cells(nb, pairs): appends one retrieval code cell per pair
-      to an nbformat notebook node.
+    - inject_retrieval_cells(nb, pairs, endpoint): appends one retrieval code
+      cell per pair to an nbformat notebook node.
     - generate_data_workflow(...): top-level glue - detect, filter, inject, write.
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
       not execute them. Collecting the printed BibTeX happens at notebook runtime.
-    - The LiPDVerse endpoint is hardcoded (same constant as pylipd_helper) rather
-      than parsed from the notebook, because it is a fixed, known endpoint and the
-      detector does not surface the notebook's url variable name.
+    - The LiPDGraph endpoint is lifted from the notebook via AST rather than
+      hardcoded, so a notebook pointed at a different repository is handled
+      correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
 """
+
+import ast
+import warnings
 
 import nbformat
 
 
 _LIPDVERSE_ENDPOINT = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
 
+# Every LinkedEarth GraphDB query endpoint has this prefix, e.g.
+# .../repositories/LiPDVerse-dynamic. Matching the full prefix picks up the
+# query endpoint set_endpoint() needs and skips the bare host URL.
+_LIPDGRAPH_ENDPOINT_PREFIX = "https://linkedearth.graphdb.mint.isi.edu/repositories/"
 
-def build_retrieval_cell(variable: str, tool: str) -> str:
+
+def extract_lipdgraph_endpoint(code: str) -> str | None:
+    """
+    Lifts the LinkedEarth graph endpoint URL from notebook code via AST.
+
+    Scans string constants for one starting with the GraphDB query-endpoint
+    prefix (.../repositories/) and returns it, so the LiPDGraph retrieval cell
+    loads from the same repository the notebook queried.
+
+    Args:
+        code: notebook Python source (all code cells concatenated)
+
+    Returns:
+        the endpoint URL string, or None if the notebook has no LiPDGraph URL
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(code)
+    except SyntaxError:
+        return None
+
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value.startswith(_LIPDGRAPH_ENDPOINT_PREFIX)):
+            return node.value
+    return None
+
+
+def build_retrieval_cell(variable: str, tool: str, endpoint: str | None = None) -> str:
     """
     Builds the Python source for a single dataset's citation-retrieval cell.
 
@@ -46,6 +86,9 @@ def build_retrieval_cell(variable: str, tool: str) -> str:
         variable: the notebook variable holding the dataset (from detection)
         tool: the dataset's source library - "PyLiPD", "PyleoTUPS", or
             "LiPDGraph" (case-insensitive)
+        endpoint: LiPDGraph only - the graph endpoint the notebook queried
+            (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
+            when None.
 
     Returns:
         Python source that, run in the notebook's kernel, prints the dataset's
@@ -73,7 +116,7 @@ def build_retrieval_cell(variable: str, tool: str) -> str:
             "from pylipd.lipd import LiPD\n"
             f'_names_{variable} = {variable}["dataSetName"].unique().tolist()\n'
             f"_lipd_{variable} = LiPD()\n"
-            f'_lipd_{variable}.set_endpoint("{_LIPDVERSE_ENDPOINT}")\n'
+            f'_lipd_{variable}.set_endpoint("{endpoint or _LIPDVERSE_ENDPOINT}")\n'
             f"_lipd_{variable}.load_remote_datasets(_names_{variable})\n"
             f"_bib_{variable}, _ = _lipd_{variable}.get_bibtex(remote=True)\n"
             f'print("\\n".join(_bib_{variable}))'
@@ -109,6 +152,7 @@ def filter_datasets(
 def inject_retrieval_cells(
     nb: nbformat.NotebookNode,
     pairs: list[list[str]],
+    endpoint: str | None = None,
 ) -> nbformat.NotebookNode:
     """
     Appends one retrieval code cell per dataset pair to a notebook node.
@@ -116,12 +160,16 @@ def inject_retrieval_cells(
     Args:
         nb: an nbformat notebook node (modified in place)
         pairs: [variable, tool] pairs to generate cells for
+        endpoint: LiPDGraph endpoint to bake into LiPDGraph cells (see
+            build_retrieval_cell); falls back to _LIPDVERSE_ENDPOINT when None
 
     Returns:
         the same notebook node, with the retrieval cells appended
     """
     for variable, tool in pairs:
-        nb.cells.append(nbformat.v4.new_code_cell(build_retrieval_cell(variable, tool)))
+        nb.cells.append(
+            nbformat.v4.new_code_cell(build_retrieval_cell(variable, tool, endpoint))
+        )
     return nb
 
 
@@ -152,15 +200,13 @@ def generate_data_workflow(
     from dataset_detection import detect_datasets
     from notebook_parser import read_notebook_code
 
-    pairs = filter_datasets(
-        detect_datasets(read_notebook_code(notebook_path)),
-        tool=tool,
-        variable=variable,
-    )
+    code = read_notebook_code(notebook_path)
+    pairs = filter_datasets(detect_datasets(code), tool=tool, variable=variable)
+    endpoint = extract_lipdgraph_endpoint(code)
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    inject_retrieval_cells(nb, pairs)
+    inject_retrieval_cells(nb, pairs, endpoint)
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
 

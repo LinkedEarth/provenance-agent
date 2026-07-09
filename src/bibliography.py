@@ -1,14 +1,28 @@
 """
-Generates an APA 7th edition bibliography from a parsed notebook result.
-Handles two citation categories:
-  - Software libraries: looked up in Citations/ YAML and .bib files,
-    converted to APA via the LLM
-  - Datasets: not fetched here — parse_notebook() returns a datasets list
-    with actionable instructions for the PaleoPAL Code Agent (PyLiPD,
-    PyleoTUPS) and SPARQL Agent (LiPDGraph) to retrieve citations
+Bibliography assembly and APA rendering - the output stage where the software
+and data workflows converge into one bibliography.
 
-All library citations are deduplicated by DOI. The final bibliography
-is returned as a JSON-formatted Jupyter markdown cell for PaleoPAL.
+Two layers, and only one of them is software-specific:
+  - Collection (software-specific here): looks up a notebook's imported
+    libraries in Citations/ (a YAML index plus per-library .bib files) and
+    merges their BibTeX, deduped by DOI. Dataset citations are collected
+    elsewhere - by the data workflow (data_workflow.py), which runs
+    get_bibtex()/get_publications() in the notebook's live kernel.
+  - Rendering/assembly (shared by both workflows): turns BibTeX into APA via
+    the LLM and assembles the final bibliography. Dataset BibTeX from the data
+    workflow is folded in as strings via the dataset_bibtex argument.
+
+Implementation:
+    - load_citation_index(): loads library_citations.yml (library name -> its
+      inline "paper" BibTeX and/or a "software" .bib file).
+    - collect_library_entries(libraries, citation_types): merges the matching
+      software BibTeX entries into one BibliographyData, deduped by DOI,
+      optionally filtered to "paper" and/or "software".
+    - render_apa() / render_bibtex_strings_to_apa(): turn BibliographyData or
+      raw BibTeX strings (e.g. dataset citations) into APA text via the LLM.
+    - generate_bibliography() / generate_bibliography_cell(): assemble the final
+      bibliography (libraries + optional dataset BibTeX) as text or as a JSON
+      notebook markdown cell.
 """
 
 import json
@@ -96,10 +110,11 @@ def render_apa(bib_data: BibliographyData) -> str:
     return "\n\n".join(citations)
 
 
-def _render_apa_from_strings(bibtex_strings: list[str]) -> str:
+def render_bibtex_strings_to_apa(bibtex_strings: list[str]) -> str:
     """
     Converts raw BibTeX strings to APA via the LLM.
-    Used for dataset citations from PyLiPD and PyleoTUPS.
+    Used for dataset citations produced by the data workflow (data_workflow.py),
+    which returns BibTeX as strings from get_bibtex() / get_publications().
 
     Args:
         bibtex_strings: list of BibTeX entry strings
@@ -118,23 +133,22 @@ def _render_apa_from_strings(bibtex_strings: list[str]) -> str:
 
 
 def generate_bibliography(
-    parse_result: dict,
+    libraries: list[str],
     citation_types: list[str] | None = None,
     dataset_bibtex: list[str] | None = None,
 ) -> str:
     """
-    Produces a bibliography string from a parse_notebook() result.
-    Collects library citations from local YAML/.bib files and converts
-    to APA. Dataset citations are not fetched here — they come from the
-    Code Agent or SPARQL Agent and are passed in via dataset_bibtex.
+    Produces a bibliography string for a notebook's imported libraries.
+    Collects library citations from local YAML/.bib files and renders them
+    to APA. Dataset citations are not collected here — the data workflow
+    produces them and they can be folded in via dataset_bibtex.
 
     Args:
-        parse_result: dict returned by parse_notebook()
+        libraries: imported library names (from parse_notebook())
         citation_types: optional filter for library citations —
             "paper" and/or "software"
         dataset_bibtex: optional list of BibTeX strings for dataset
-            citations, provided by the Code Agent / SPARQL Agent after
-            executing the actions in parse_result["datasets"]
+            citations, produced by the data workflow (data_workflow.py)
 
     Returns:
         formatted bibliography string
@@ -142,7 +156,6 @@ def generate_bibliography(
     parts = []
 
     # Library citations
-    libraries = parse_result["libraries"]
     index = load_citation_index()
     entries = collect_library_entries(libraries, citation_types)
 
@@ -154,33 +167,33 @@ def generate_bibliography(
     if not_found:
         parts.append("\n".join(f"[No citation found for: {lib}]" for lib in not_found))
 
-    # Dataset citations (provided by agents)
+    # Dataset citations (produced by the data workflow)
     if dataset_bibtex:
-        parts.append(_render_apa_from_strings(dataset_bibtex))
+        parts.append(render_bibtex_strings_to_apa(dataset_bibtex))
 
     return "\n\n".join(parts)
 
 
 def generate_bibliography_cell(
-    parse_result: dict,
+    libraries: list[str],
     citation_types: list[str] | None = None,
     dataset_bibtex: list[str] | None = None,
 ) -> str:
     """
     Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
-    This is the final step in the pipeline — the returned JSON string
-    can be parsed and appended to a notebook's cell list by PaleoPAL.
+    The returned JSON string can be parsed and appended to a notebook's cell
+    list.
 
     Args:
-        parse_result: dict returned by parse_notebook()
+        libraries: imported library names (from parse_notebook())
         citation_types: optional filter for library citations
         dataset_bibtex: optional list of BibTeX strings for dataset
-            citations, provided by the Code Agent / SPARQL Agent
+            citations, produced by the data workflow (data_workflow.py)
 
     Returns:
         JSON string representing a notebook markdown cell with the bibliography
     """
-    bib_text = generate_bibliography(parse_result, citation_types, dataset_bibtex)
+    bib_text = generate_bibliography(libraries, citation_types, dataset_bibtex)
     cell = {
         "cell_type": "markdown",
         "metadata": {},

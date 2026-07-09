@@ -117,23 +117,14 @@ def test_extract_import_inside_function():
 # parse_notebook — sample.ipynb
 # ---------------------------------------------------------------------------
 
-def test_parse_returns_dict():
-    assert isinstance(parse_notebook(SAMPLE), dict)
-
-
-def test_parse_has_expected_keys():
-    result = parse_notebook(SAMPLE)
-    assert "libraries" in result and "datasets" in result
-
-
-def test_parse_libraries_is_sorted_list():
-    libs = parse_notebook(SAMPLE)["libraries"]
+def test_parse_returns_sorted_list():
+    libs = parse_notebook(SAMPLE)
     assert isinstance(libs, list)
     assert libs == sorted(libs)
 
 
 def test_parse_libraries_contains_expected():
-    libs = parse_notebook(SAMPLE)["libraries"]
+    libs = parse_notebook(SAMPLE)
     for expected in ("numpy", "pandas", "matplotlib", "pyleoclim"):
         assert expected in libs
 
@@ -143,6 +134,6 @@ def test_parse_libraries_contains_expected():
 # ---------------------------------------------------------------------------
 
 def test_parse_magic_notebook_extracts_imports_despite_magic():
-    libs = parse_notebook(MAGIC_NB)["libraries"]
+    libs = parse_notebook(MAGIC_NB)
     for expected in ("numpy", "pandas", "pyleoclim", "scipy"):
         assert expected in libs, f"expected '{expected}' in libraries but got {libs}"

@@ -31,7 +31,12 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from data_workflow import build_retrieval_cell, filter_datasets, inject_retrieval_cells
+from data_workflow import (
+    build_retrieval_cell,
+    extract_lipdgraph_endpoint,
+    filter_datasets,
+    inject_retrieval_cells,
+)
 
 
 # --- build_retrieval_cell ----------------------------------------------------
@@ -54,9 +59,45 @@ def test_lipdgraph_cell_converts_dataframe_to_lipd():
     assert "get_bibtex(remote=True)" in cell
 
 
+def test_lipdgraph_cell_uses_supplied_endpoint():
+    cell = build_retrieval_cell("df", "LiPDGraph", endpoint="https://example.org/repositories/Other")
+    assert 'set_endpoint("https://example.org/repositories/Other")' in cell
+
+
 def test_unsupported_tool_raises():
     with pytest.raises(ValueError):
         build_retrieval_cell("iso_ds", "xarray")
+
+
+# --- extract_lipdgraph_endpoint ----------------------------------------------
+
+def test_extract_endpoint_from_url_assignment():
+    code = "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+    assert extract_lipdgraph_endpoint(code) == (
+        "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+    )
+
+
+def test_extract_endpoint_skips_bare_host_url():
+    code = (
+        "base = 'https://linkedearth.graphdb.mint.isi.edu'\n"
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+    )
+    assert extract_lipdgraph_endpoint(code) == (
+        "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+    )
+
+
+def test_extract_endpoint_returns_none_when_absent():
+    assert extract_lipdgraph_endpoint("x = 1\nimport pandas as pd") is None
+
+
+def test_extract_endpoint_ignores_bare_host_only():
+    assert extract_lipdgraph_endpoint("url = 'https://linkedearth.graphdb.mint.isi.edu'") is None
+
+
+def test_extract_endpoint_survives_syntax_error():
+    assert extract_lipdgraph_endpoint("def broken(:\n  pass") is None
 
 
 # --- filter_datasets ---------------------------------------------------------

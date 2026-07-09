@@ -1,17 +1,36 @@
 """
-Parses Jupyter Notebook (.ipynb) files to extract library imports and
-dataset sources. Uses nbformat for notebook I/O and ast for code analysis.
-Delegates dataset object detection to pylipd_helper, pyleotups_helper, and
-lipdgraph_helper. Output is structured as actionable instructions for the
-PaleoPAL Code Agent and SPARQL Agent.
+Software side of the provenance agent: reads Jupyter Notebook (.ipynb) files
+and extracts the Python libraries they import.
+
+Purpose:
+    The software workflow needs the set of imported libraries so it can look up
+    their citations. This module does that extraction with `ast`, plus it
+    provides `read_notebook_code()`, the raw-code reader shared with the LLM
+    dataset detector (dataset_detection.py).
+
+Implementation:
+    - strip_ipython_directives(code): removes magics (`%`, `%%`) and shell
+      lines (`!`) so `ast.parse()` only sees valid Python; whole-cell magics
+      whose body is not Python (e.g. `%%bash`) are dropped entirely.
+    - extract_libraries(code): walks the AST and collects top-level package
+      names from `import` / `from ... import` statements.
+    - parse_notebook(path): reads a notebook and returns its sorted list of
+      imported library names.
+    - read_notebook_code(path): returns all code cells concatenated (directives
+      stripped) - the full source the LLM detector reasons over.
+    - validate_libraries(requested, available): case-insensitive membership
+      check used by the "cite one specific library" mode.
+
+Design decisions:
+    - Detection of *datasets* is NOT done here. It is done by an LLM in
+      dataset_detection.py, because tracing data flow to the terminal analysis
+      variable across many cells is far more robust with an LLM than with static
+      AST analysis. This module is purely the software (import) side.
 """
 
 import ast
 import nbformat
 import warnings
-from pylipd_helper import extract_lipd_objects
-from pyleotups_helper import extract_pyleotups_objects
-from lipdgraph_helper import detect_lipdgraph_queries
 
 # Cell magics whose body is not Python — discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
@@ -89,55 +108,6 @@ def validate_libraries(requested: list[str], available: list[str]) -> tuple[list
     return found, not_found
 
 
-def _build_datasets(
-    lipd_objects: dict[str, str],
-    pyleotups_objects: dict[str, str],
-    lipdgraph: dict | None,
-) -> list[dict]:
-    """
-    Converts raw detection results into a unified list of dataset actions.
-
-    Each entry tells the provenance agent which agent to call, which
-    variable to reference, and what action to take to retrieve citations.
-
-    Args:
-        lipd_objects: {var_name: "LiPD"} from extract_lipd_objects()
-        pyleotups_objects: {var_name: class_name} from extract_pyleotups_objects()
-        lipdgraph: dict from detect_lipdgraph_queries(), or None
-
-    Returns:
-        list of dataset action dicts
-    """
-    datasets = []
-
-    for var, cls in lipd_objects.items():
-        datasets.append({
-            "variable": var,
-            "source_type": "PyLiPD",
-            "agent": "code",
-            "action": f"{var}.get_bibtex(remote=True)",
-        })
-
-    for var, cls in pyleotups_objects.items():
-        datasets.append({
-            "variable": var,
-            "source_type": "PyleoTUPS",
-            "class": cls,
-            "agent": "code",
-            "action": f"{var}.get_publications()",
-        })
-
-    if lipdgraph and lipdgraph.get("result_var"):
-        datasets.append({
-            "variable": lipdgraph["result_var"],
-            "source_type": "LiPDGraph",
-            "agent": "sparql",
-            "endpoint": lipdgraph["endpoint"],
-        })
-
-    return datasets
-
-
 def read_notebook_code(path: str) -> str:
     """
     Reads a .ipynb file and returns all code cells concatenated into one string,
@@ -160,24 +130,16 @@ def read_notebook_code(path: str) -> str:
     )
 
 
-def parse_notebook(path: str | None = None) -> dict:
+def parse_notebook(path: str | None = None) -> list[str]:
     """
-    Reads a .ipynb file and returns its imported libraries and dataset
-    sources. Each dataset entry is an actionable instruction: which agent
-    to call, which variable to reference, and what to do to get citations.
+    Reads a .ipynb file and returns the sorted list of libraries it imports.
 
     Args:
-        path: path to a .ipynb file, or None to auto-detect
+        path: path to a .ipynb file, or None to auto-detect the current
+            notebook (requires ipynbname and a running kernel)
 
     Returns:
-        dict with:
-            libraries: sorted list of imported library names
-            datasets: list of dataset action dicts, each with:
-                - variable: the object name in the notebook
-                - source_type: "PyLiPD", "PyleoTUPS", or "LiPDGraph"
-                - agent: "code" or "sparql"
-                - action: the function call string (code agent)
-                - endpoint: the SPARQL endpoint URL (sparql agent)
+        sorted list of imported top-level library names
     """
     if path is None:
         try:
@@ -193,26 +155,11 @@ def parse_notebook(path: str | None = None) -> dict:
         nb = nbformat.read(f, as_version=4)
 
     libraries = set()
-    all_cleaned_code = []
-
     for cell in nb.cells:
         if cell.cell_type == "code":
-            cleaned = strip_ipython_directives(cell.source)
             libraries |= extract_libraries(cell.source)
-            all_cleaned_code.append(cleaned)
 
-    full_code = "\n".join(all_cleaned_code)
-
-    datasets = _build_datasets(
-        lipd_objects=extract_lipd_objects(full_code),
-        pyleotups_objects=extract_pyleotups_objects(full_code),
-        lipdgraph=detect_lipdgraph_queries(full_code),
-    )
-
-    return {
-        "libraries": sorted(libraries),
-        "datasets": datasets,
-    }
+    return sorted(libraries)
 
 
 if __name__ == "__main__":
@@ -220,9 +167,4 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python notebook_parser.py <path_to_notebook.ipynb>")
         sys.exit(1)
-    result = parse_notebook(sys.argv[1])
-    print("Libraries:", result["libraries"])
-    print("Datasets:")
-    for ds in result["datasets"]:
-        print(f"  [{ds['agent']}] {ds['variable']} ({ds['source_type']})"
-              + (f" → {ds['action']}" if "action" in ds else ""))
+    print("Libraries:", parse_notebook(sys.argv[1]))
