@@ -117,6 +117,16 @@ def test_no_filter_returns_all():
     assert filter_datasets(PAIRS) == PAIRS
 
 
+def test_filter_by_variable_list():
+    assert filter_datasets(PAIRS, variable=["D", "filtered_df2"]) == [
+        ["D", "PyLiPD"], ["filtered_df2", "LiPDGraph"]
+    ]
+
+
+def test_filter_by_variable_str_still_works():
+    assert filter_datasets(PAIRS, variable="ds") == [["ds", "PyleoTUPS"]]
+
+
 # --- inject_retrieval_cells --------------------------------------------------
 
 def test_inject_appends_one_code_cell_per_pair():

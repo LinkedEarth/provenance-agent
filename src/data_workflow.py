@@ -128,7 +128,7 @@ def build_retrieval_cell(variable: str, tool: str, endpoint: str | None = None) 
 def filter_datasets(
     pairs: list[list[str]],
     tool: str | None = None,
-    variable: str | None = None,
+    variable: str | list[str] | None = None,
 ) -> list[list[str]]:
     """
     Narrows detected [variable, tool] pairs by tool and/or variable.
@@ -136,7 +136,8 @@ def filter_datasets(
     Args:
         pairs: detected [variable, tool] pairs
         tool: if given, keep only pairs whose tool matches (case-insensitive)
-        variable: if given, keep only the pair for this variable
+        variable: if given, keep only pairs for this variable name or, if a
+            list, any variable in it
 
     Returns:
         the filtered list of pairs (all pairs when no filter is given)
@@ -145,7 +146,8 @@ def filter_datasets(
     if tool is not None:
         result = [p for p in result if p[1].lower() == tool.lower()]
     if variable is not None:
-        result = [p for p in result if p[0] == variable]
+        wanted = {variable} if isinstance(variable, str) else set(variable)
+        result = [p for p in result if p[0] in wanted]
     return result
 
 
