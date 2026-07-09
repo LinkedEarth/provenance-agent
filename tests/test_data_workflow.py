@@ -137,3 +137,24 @@ def test_inject_appends_one_code_cell_per_pair():
     assert len(code_cells) == 3  # original + 2 injected
     assert "D.get_bibtex(remote=True)" in code_cells[1].source
     assert "ds.get_publications()" in code_cells[2].source
+
+
+# --- fmt parameter for APA rendering -----------------------------------------
+
+def test_pylipd_cell_apa_renders_via_bibliography():
+    cell = build_retrieval_cell("D", "PyLiPD", fmt="apa")
+    assert "_bib_D, _ = D.get_bibtex(remote=True)" in cell
+    assert "from bibliography import render_bibtex_strings_to_apa" in cell
+    assert "print(render_bibtex_strings_to_apa(_bib_D))" in cell
+
+
+def test_pyleotups_cell_apa_wraps_publications():
+    cell = build_retrieval_cell("ds", "PyleoTUPS", fmt="apa")
+    assert "ds.get_publications()" in cell
+    assert "render_bibtex_strings_to_apa(_bib_ds)" in cell
+
+
+def test_bibtex_fmt_is_unchanged_default():
+    cell = build_retrieval_cell("D", "PyLiPD")
+    assert 'print("\\n".join(_bib_D))' in cell
+    assert "render_bibtex_strings_to_apa" not in cell

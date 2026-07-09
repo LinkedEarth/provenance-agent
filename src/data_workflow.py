@@ -78,7 +78,12 @@ def extract_lipdgraph_endpoint(code: str) -> str | None:
     return None
 
 
-def build_retrieval_cell(variable: str, tool: str, endpoint: str | None = None) -> str:
+def build_retrieval_cell(
+    variable: str,
+    tool: str,
+    endpoint: str | None = None,
+    fmt: str = "bibtex",
+) -> str:
     """
     Builds the Python source for a single dataset's citation-retrieval cell.
 
@@ -89,10 +94,12 @@ def build_retrieval_cell(variable: str, tool: str, endpoint: str | None = None) 
         endpoint: LiPDGraph only - the graph endpoint the notebook queried
             (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
             when None.
+        fmt: "bibtex" (default) prints the raw BibTeX; "apa" renders it to APA
+            in-kernel via bibliography.render_bibtex_strings_to_apa.
 
     Returns:
         Python source that, run in the notebook's kernel, prints the dataset's
-        BibTeX
+        citations
 
     Raises:
         ValueError: if tool is not one of the supported dataset sources
@@ -100,29 +107,33 @@ def build_retrieval_cell(variable: str, tool: str, endpoint: str | None = None) 
     t = tool.lower()
 
     if t == "pylipd":
-        return (
-            f"_bib_{variable}, _ = {variable}.get_bibtex(remote=True)\n"
-            f'print("\\n".join(_bib_{variable}))'
-        )
-
-    if t == "pyleotups":
-        return (
+        body = f"_bib_{variable}, _ = {variable}.get_bibtex(remote=True)\n"
+    elif t == "pyleotups":
+        body = (
             f"_pub_{variable}, _ = {variable}.get_publications()\n"
-            f'print(_pub_{variable}.to_string(bib_format="bibtex"))'
+            f'_bib_{variable} = [_pub_{variable}.to_string(bib_format="bibtex")]\n'
         )
-
-    if t == "lipdgraph":
-        return (
+    elif t == "lipdgraph":
+        body = (
             "from pylipd.lipd import LiPD\n"
             f'_names_{variable} = {variable}["dataSetName"].unique().tolist()\n'
             f"_lipd_{variable} = LiPD()\n"
             f'_lipd_{variable}.set_endpoint("{endpoint or _LIPDVERSE_ENDPOINT}")\n'
             f"_lipd_{variable}.load_remote_datasets(_names_{variable})\n"
             f"_bib_{variable}, _ = _lipd_{variable}.get_bibtex(remote=True)\n"
-            f'print("\\n".join(_bib_{variable}))'
         )
+    else:
+        raise ValueError(f"Unsupported dataset tool: {tool!r}")
 
-    raise ValueError(f"Unsupported dataset tool: {tool!r}")
+    if fmt == "apa":
+        out = (
+            "from bibliography import render_bibtex_strings_to_apa\n"
+            f"print(render_bibtex_strings_to_apa(_bib_{variable}))"
+        )
+    else:
+        out = f'print("\\n".join(_bib_{variable}))'
+
+    return body + out
 
 
 def filter_datasets(
@@ -155,6 +166,7 @@ def inject_retrieval_cells(
     nb: nbformat.NotebookNode,
     pairs: list[list[str]],
     endpoint: str | None = None,
+    fmt: str = "bibtex",
 ) -> nbformat.NotebookNode:
     """
     Appends one retrieval code cell per dataset pair to a notebook node.
@@ -164,13 +176,15 @@ def inject_retrieval_cells(
         pairs: [variable, tool] pairs to generate cells for
         endpoint: LiPDGraph endpoint to bake into LiPDGraph cells (see
             build_retrieval_cell); falls back to _LIPDVERSE_ENDPOINT when None
+        fmt: "bibtex" (default) or "apa" - format for citations in the
+            injected cell (see build_retrieval_cell)
 
     Returns:
         the same notebook node, with the retrieval cells appended
     """
     for variable, tool in pairs:
         nb.cells.append(
-            nbformat.v4.new_code_cell(build_retrieval_cell(variable, tool, endpoint))
+            nbformat.v4.new_code_cell(build_retrieval_cell(variable, tool, endpoint, fmt))
         )
     return nb
 
@@ -180,6 +194,7 @@ def generate_data_workflow(
     tool: str | None = None,
     variable: str | None = None,
     output_path: str | None = None,
+    fmt: str = "bibtex",
 ) -> list[list[str]]:
     """
     Detects datasets in a notebook and injects their citation-retrieval cells.
@@ -187,7 +202,7 @@ def generate_data_workflow(
     Reads the notebook, detects its dataset variables via the LLM, optionally
     filters them, appends a retrieval cell per dataset, and writes the notebook
     back. The user then runs the injected cells in the live kernel to print the
-    BibTeX.
+    citations.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -195,6 +210,8 @@ def generate_data_workflow(
         variable: optional single-variable filter
         output_path: where to write the modified notebook (defaults to
             notebook_path, i.e. in place)
+        fmt: "bibtex" (default) or "apa" - format for citations in the
+            injected cell
 
     Returns:
         the [variable, tool] pairs that had cells injected
@@ -208,7 +225,7 @@ def generate_data_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    inject_retrieval_cells(nb, pairs, endpoint)
+    inject_retrieval_cells(nb, pairs, endpoint, fmt)
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
 
