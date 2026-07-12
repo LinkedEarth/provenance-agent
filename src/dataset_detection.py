@@ -125,10 +125,10 @@ def detect_datasets(code: str) -> list[list[str]]:
         list of [variable, tool] pairs identifying the terminal variables that
         hold the datasets used for analysis
     """
-    from llm import llm
+    from llm import llm, message_text
 
     response = llm.invoke(build_detection_prompt(code))
-    return parse_detection_response(response.content)
+    return parse_detection_response(message_text(response))
 
 
 def detect_datasets_in_notebook(path: str) -> list[list[str]]:
