@@ -31,6 +31,9 @@ Design decisions:
     - Detection is scored on the notebook's code (read_notebook_code), never
       by executing the notebook - retrieval is out of scope, so the
       benchmark needs only a Gemini API key and runs in seconds per trial.
+    - Gemini calls are paced (_INTER_CALL_DELAY between calls) and wrapped in
+      call_with_retry, because the free tier's requests-per-minute quota
+      otherwise kills a corpus-wide run partway through with a 429.
     - Empty-vs-empty scores 1.0 across the board: a notebook with no dataset
       sources is attributed correctly when the agent finds none.
     - src/ is added to sys.path here (mirroring the tests) because the repo
@@ -43,6 +46,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import yaml
 
@@ -50,6 +54,10 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 
 _SCORE_FIELDS = ("tp", "fp", "fn", "precision", "recall", "f1")
+
+# Seconds between consecutive Gemini calls, to stay under the free tier's
+# requests-per-minute quota (~20 RPM at the time of writing).
+_INTER_CALL_DELAY = 5.0
 
 
 def _rates(tp: float, fp: float, fn: float) -> dict:
@@ -154,6 +162,36 @@ def load_ground_truth(directory: str) -> list[dict]:
     return sorted(truths, key=lambda gt: gt["notebook"])
 
 
+def call_with_retry(fn, attempts: int = 5, base_delay: float = 30.0,
+                    sleep=time.sleep):
+    """
+    Calls fn(), retrying with exponential backoff on API quota errors.
+
+    The Gemini free tier enforces a small requests-per-minute quota, so a
+    corpus-wide benchmark run must absorb 429s rather than crash mid-run.
+    Only quota errors (429 / RESOURCE_EXHAUSTED in the message) are retried;
+    anything else propagates immediately.
+
+    Args:
+        fn: zero-argument callable to invoke
+        attempts: maximum number of tries before giving up
+        base_delay: first backoff delay in seconds; doubles per retry
+        sleep: sleep function (injectable for tests)
+
+    Returns:
+        fn()'s return value
+    """
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            message = str(exc)
+            quota = "429" in message or "RESOURCE_EXHAUSTED" in message
+            if not quota or attempt == attempts - 1:
+                raise
+            sleep(base_delay * 2 ** attempt)
+
+
 def benchmark_notebook(gt: dict, trials: int) -> dict:
     """
     Runs both attribution workflows on one notebook and scores them.
@@ -175,8 +213,10 @@ def benchmark_notebook(gt: dict, trials: int) -> dict:
 
     code = read_notebook_code(path)
     data_trials, predictions = [], []
-    for _ in range(trials):
-        pairs = detect_datasets(code)
+    for trial in range(trials):
+        if trial:
+            time.sleep(_INTER_CALL_DELAY)
+        pairs = call_with_retry(lambda: detect_datasets(code))
         predictions.append(pairs)
         data_trials.append(score_pairs(pairs, gt["datasets"]))
 
@@ -224,7 +264,9 @@ def main() -> None:
         sys.exit("No ground-truth files matched.")
 
     results = []
-    for gt in truths:
+    for i, gt in enumerate(truths):
+        if i:
+            time.sleep(_INTER_CALL_DELAY)
         result = benchmark_notebook(gt, args.trials)
         results.append(result)
         name = os.path.basename(result["notebook"])

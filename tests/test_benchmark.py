@@ -33,6 +33,7 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmark"))
 
 from run_benchmark import (
+    call_with_retry,
     load_ground_truth,
     mean_scores,
     micro_average,
@@ -137,6 +138,42 @@ def test_micro_average_pools_counts_before_computing_rates():
     assert micro["tp"] == 2 and micro["fp"] == 2 and micro["fn"] == 1
     assert micro["precision"] == pytest.approx(0.5)
     assert micro["recall"] == pytest.approx(2 / 3)
+
+
+# ------------------------------------------------------------ call_with_retry
+
+def test_call_with_retry_retries_quota_errors_with_backoff():
+    calls, sleeps = [], []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+        return "ok"
+
+    assert call_with_retry(flaky, base_delay=10.0, sleep=sleeps.append) == "ok"
+    assert len(calls) == 3
+    assert sleeps == [10.0, 20.0]  # exponential backoff
+
+
+def test_call_with_retry_raises_non_quota_errors_immediately():
+    def broken():
+        raise ValueError("something unrelated")
+
+    with pytest.raises(ValueError):
+        call_with_retry(broken, sleep=lambda _: None)
+
+
+def test_call_with_retry_gives_up_after_max_attempts():
+    calls = []
+
+    def always_throttled():
+        calls.append(1)
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    with pytest.raises(RuntimeError):
+        call_with_retry(always_throttled, attempts=3, sleep=lambda _: None)
+    assert len(calls) == 3
 
 
 # ----------------------------------------------------------- load_ground_truth
