@@ -1,0 +1,51 @@
+notebook: notebooks/comparing-simulated-reconstructed-climate/CMIP6_LMR.ipynb
+software:
+  - cartopy
+  - cftime
+  - collections
+  - intake
+  - matplotlib
+  - numpy
+  - os
+  - pandas
+  - pathlib
+  - pyleoclim
+  - xarray
+datasets:
+  - variable: p2k_nc
+    tool: xarray
+  - variable: miroc_hist
+    tool: xarray
+  - variable: mri_hist
+    tool: xarray
+  - variable: mpi_hist
+    tool: xarray
+  - variable: miroc_past1000
+    tool: xarray
+  - variable: mri_past1000
+    tool: xarray
+  - variable: mpi_past1000
+    tool: xarray
+  - variable: lmr_ds_gridded_temp
+    tool: xarray
+notes: |
+  Four external sources, several fanning out into multiple terminal variables:
+  1. p2k_nc: xr.open_dataset of local data/p2k_ngeo19_recons.nc (downloaded PAGES2k/LMR
+     reconstructions). Analyzed directly (groupby ens -> pyleo.EnsembleSeries), so p2k_nc
+     is terminal; lmr_ens is a pyleoclim object, not the same family.
+  2. CMIP6 historical runs come through an intake-esm cloud catalog (col -> search_res ->
+     _esm_data_d/esm_data_d dicts of xarray Datasets). The dicts are not dataset objects,
+     so the terminal variables are the per-model Datasets actually analyzed: miroc_hist,
+     mri_hist, mpi_hist. Labeled xarray (terminal type is an xarray Dataset) even though
+     the loader is intake-esm - per the type-of-terminal-variable convention.
+  3. past1000 runs come from Pangeo-Forge zarr stores via xr.open_dataset into the
+     PF_data_d dict; terminal analyzed variables are miroc_past1000, mri_past1000
+     (direct alias of PF_data_d['MRI']), and mpi_past1000 (sel from mpi_past2k after a
+     calendar shift).
+  4. lmr_ds_gridded: LMRv2.1 gridded ensemble zarr via xr.open_dataset. lmr_ds_gridded is
+     only touched to extract 'air_mean'; all analysis (timeseries at a location, snapshot
+     mean) flows from lmr_ds_gridded_temp, so that DataArray is recorded as terminal.
+     lmr_ds_gridded itself would be a defensible alternative answer.
+  pandas is imported but only lightly used; it still counts as imported software. The
+  first import cell begins with %load_ext (line magic, not a %% cell magic), so its
+  imports count. No imports live inside %%time cells.

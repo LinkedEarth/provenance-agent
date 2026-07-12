@@ -13,7 +13,9 @@ Implementation:
       lines (`!`) so `ast.parse()` only sees valid Python; whole-cell magics
       whose body is not Python (e.g. `%%bash`) are dropped entirely.
     - extract_libraries(code): walks the AST and collects top-level package
-      names from `import` / `from ... import` statements.
+      names from `import` / `from ... import` statements. Cells with syntax
+      errors fall back to line-by-line import recovery, since a broken cell's
+      imports are still real dependencies.
     - parse_notebook(path): reads a notebook and returns its sorted list of
       imported library names.
     - read_notebook_code(path): returns all code cells concatenated (directives
@@ -29,8 +31,10 @@ Design decisions:
 """
 
 import ast
-import nbformat
+import re
 import warnings
+
+import nbformat
 
 # Cell magics whose body is not Python — discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
@@ -70,15 +74,9 @@ def strip_ipython_directives(code: str) -> str:
     return "\n".join(cleaned)
 
 
-def extract_libraries(code: str) -> set[str]:
-    """Extracts top-level package names imported in a Python source string."""
+def _libraries_from_tree(tree: ast.AST) -> set[str]:
+    """Collects top-level package names from Import/ImportFrom nodes in an AST."""
     libraries = set()
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)
-            tree = ast.parse(strip_ipython_directives(code))
-    except SyntaxError:
-        return libraries
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -87,6 +85,53 @@ def extract_libraries(code: str) -> set[str]:
             if node.module:
                 libraries.add(node.module.split(".")[0])
     return libraries
+
+
+def _recover_imports_linewise(code: str) -> set[str]:
+    """
+    Salvages imports from source that does not parse as a whole.
+
+    Research notebooks routinely contain cells with syntax errors (e.g. a
+    function whose docstring and body disagree on indentation); their imports
+    are still real dependencies. Each line that looks like an import statement
+    is parsed on its own; lines that still fail (e.g. an open parenthesis in
+    `from x import (`) fall back to a regex for the leading module name.
+
+    Args:
+        code: Python source that raised SyntaxError when parsed whole
+
+    Returns:
+        the top-level package names recovered from import-like lines
+    """
+    libraries = set()
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("import ", "from ")):
+            continue
+        try:
+            libraries |= _libraries_from_tree(ast.parse(stripped))
+        except SyntaxError:
+            match = re.match(r"(?:import|from)\s+([A-Za-z_][\w.]*)", stripped)
+            if match:
+                libraries.add(match.group(1).split(".")[0])
+    return libraries
+
+
+def extract_libraries(code: str) -> set[str]:
+    """
+    Extracts top-level package names imported in a Python source string.
+
+    Falls back to line-by-line import recovery when the source has a syntax
+    error, so a broken cell still contributes its imports.
+    """
+    cleaned = strip_ipython_directives(code)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(cleaned)
+    except SyntaxError:
+        return _recover_imports_linewise(cleaned)
+    return _libraries_from_tree(tree)
 
 
 def validate_libraries(requested: list[str], available: list[str]) -> tuple[list[str], list[str]]:

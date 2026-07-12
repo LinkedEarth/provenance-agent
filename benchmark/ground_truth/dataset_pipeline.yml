@@ -1,0 +1,25 @@
+notebook: notebooks/testing/dataset_pipeline.ipynb
+software:
+  - bibliography
+  - notebook_parser
+  - pyleotups
+  - pylipd
+  - sys
+datasets:
+  - variable: D
+    tool: PyLiPD
+  - variable: ds
+    tool: PyleoTUPS
+  - variable: ds_noaa
+    tool: PyleoTUPS
+notes: |
+  notebook_parser and bibliography are this repo's own src/ modules (imported
+  after a sys.path.insert); they are still top-level imports in code cells, so
+  they are listed per the ground-truth rules.
+  The dataset cells are sample fixtures the notebook's markdown says are never
+  executed - D, ds, and ds_noaa are loaded/searched but never analyzed further
+  (the "analysis" cells run the citation pipeline itself on this notebook's
+  source). They are kept as dataset entries because they are the dataset
+  sources the fixture is designed to exercise.
+  result, bib_text, and cell_json hold pipeline outputs (parse results and
+  bibliography text), not dataset objects, so they are excluded.

@@ -1,0 +1,30 @@
+notebook: notebooks/C02_b_DA_with_individual_seasonality.ipynb
+software:
+  - cfr
+  - numpy
+  - pickle
+  - tqdm
+datasets:
+  - variable: pickle_db
+    tool: cfr
+  - variable: job
+    tool: cfr
+notes: |
+  Software: the first cell starts with %load_ext / %autoreload magic lines, but
+  those are single-% line directives, not a %% cell magic, so the imports below
+  them (cfr, numpy) still count. "import cfr.psm as psm" inside cell 6 maps to
+  top-level cfr; tqdm is imported in the same cell.
+  pickle_db is a cfr ProxyDatabase deserialized from a local pickle
+  (./prev_data/pdb_w_seasonality_annual.pkl). It is the proxy dataset driving
+  the whole data assimilation (assigned to job.proxydb and plotted/calibrated),
+  so it is included even though the load itself is a local pickle read rather
+  than a remote fetch. Tool is labeled cfr because the object lives as a cfr
+  ProxyDatabase; pickle is only the deserialization mechanism - judgment call.
+  job (cfr.ReconJob) is listed because the external climate data is loaded onto
+  it via job.load_clim(): the CCSM4 past1000 prior and GPCC obs come from local
+  NetCDF files, and the 'gistemp1200_ERSSTv4' obs entry is a cfr fetch-by-name
+  that downloads remote data. That data lives only as attributes of job
+  (job.prior, job.obs), so job is the terminal variable for it.
+  res (cfr.ReconRes) is excluded: it loads the reconstruction output this very
+  notebook generated (./recons/lipd_seasonality_pda/), which is a derived
+  result, not an external dataset.
