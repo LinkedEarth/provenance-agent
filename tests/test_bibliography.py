@@ -88,3 +88,12 @@ def test_multiple_libraries_with_distinct_papers_are_not_corrupted():
     assert by_library.loc["numpy", "doi"] == "10.1038/s41586-020-2649-2"
     assert by_library.loc["pyleoclim", "key"] == "khider2022pyleoclim"
     assert by_library.loc["pyleoclim", "doi"] == "10.1029/2022PA004509"
+
+
+def test_render_apa_calls_llm_per_row_and_joins(monkeypatch):
+    import llm
+    monkeypatch.setattr(llm, "bibtex_to_apa", lambda bibtex: f"APA[{bibtex[:20]}]")
+
+    df = collect_library_entries(["pyleoclim"], citation_types=["software"])
+    out = bibliography.render_apa(df)
+    assert out.startswith("APA[@software{pyleoclim_")

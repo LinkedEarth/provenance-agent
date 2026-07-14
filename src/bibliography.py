@@ -18,8 +18,10 @@ Implementation:
     - collect_library_entries(libraries, citation_types): merges the matching
       software BibTeX entries into a DataFrame, deduped by DOI, optionally
       filtered to "paper" and/or "software".
-    - render_apa() / render_bibtex_strings_to_apa(): turn DataFrame rows or
-      raw BibTeX strings (e.g. dataset citations) into APA text via the LLM.
+    - render_apa(entries): takes the DataFrame from collect_library_entries()
+      and converts each entry's BibTeX to APA via the LLM.
+    - render_bibtex_strings_to_apa(): turns raw BibTeX strings (e.g. dataset
+      citations) into APA text via the LLM.
     - generate_bibliography() / generate_bibliography_cell(): assemble the final
       bibliography (libraries + optional dataset BibTeX) as text or as a JSON
       notebook markdown cell.
@@ -145,26 +147,21 @@ def collect_library_entries(
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
 
-def render_apa(bib_data: BibliographyData) -> str:
+def render_apa(entries: pd.DataFrame) -> str:
     """
-    Converts BibliographyData to APA 7th edition plain text by sending
-    each BibTeX entry through the LLM.
+    Converts collected citation entries to APA 7th edition plain text by
+    sending each entry's BibTeX through the LLM.
 
     Args:
-        bib_data: collected BibTeX entries
+        entries: DataFrame from collect_library_entries(), must have a
+            "bibtex" column
 
     Returns:
         APA-formatted citation string with entries separated by blank lines
     """
     from llm import bibtex_to_apa
 
-    citations = []
-    for key, entry in bib_data.entries.items():
-        single = BibliographyData(entries={key: entry})
-        bibtex_str = single.to_string(bib_format="bibtex").strip()
-        apa = bibtex_to_apa(bibtex_str)
-        citations.append(apa)
-
+    citations = [bibtex_to_apa(bibtex) for bibtex in entries["bibtex"]]
     return "\n\n".join(citations)
 
 
