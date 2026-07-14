@@ -4,3 +4,4 @@ benchmark/results/
 CLAUDE.md
 .DS_Store
 src/.env
+.worktrees/
