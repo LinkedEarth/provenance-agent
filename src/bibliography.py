@@ -120,7 +120,6 @@ def collect_library_entries(
         with both a paper and a software citation produces two rows
     """
     index = load_citation_index()
-    parser = _bibtex_parser()
     seen_dois: set[str] = set()
     rows: list[dict] = []
 
@@ -132,14 +131,14 @@ def collect_library_entries(
         lib_entry = index[lib_lower] or {}
 
         if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
-            entry = bibtexparser.loads(lib_entry["paper"], parser=parser).entries[0]
+            entry = bibtexparser.loads(lib_entry["paper"], parser=_bibtex_parser()).entries[0]
             _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
             bib_path = os.path.join(_CITATIONS_DIR, f"{lib_lower}.bib")
             if os.path.exists(bib_path):
                 with open(bib_path) as f:
-                    entries = bibtexparser.load(f, parser=parser).entries
+                    entries = bibtexparser.load(f, parser=_bibtex_parser()).entries
                 for entry in entries:
                     _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
 

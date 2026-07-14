@@ -74,3 +74,17 @@ def test_unknown_library_yields_no_rows():
     assert list(df.columns) == [
         "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
     ]
+
+
+def test_multiple_libraries_with_distinct_papers_are_not_corrupted():
+    df = collect_library_entries(
+        ["pandas", "numpy", "pyleoclim"], citation_types=["paper"]
+    )
+    assert len(df) == 3
+    by_library = df.set_index("library")
+    assert by_library.loc["pandas", "key"] == "mckinney2010data"
+    assert by_library.loc["pandas", "doi"] == "10.25080/Majora-92bf1922-00a"
+    assert by_library.loc["numpy", "key"] == "harris2020array"
+    assert by_library.loc["numpy", "doi"] == "10.1038/s41586-020-2649-2"
+    assert by_library.loc["pyleoclim", "key"] == "khider2022pyleoclim"
+    assert by_library.loc["pyleoclim", "doi"] == "10.1029/2022PA004509"
