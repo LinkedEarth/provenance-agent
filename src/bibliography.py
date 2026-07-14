@@ -16,9 +16,9 @@ Implementation:
     - load_citation_index(): loads library_citations.yml (library name -> its
       inline "paper" BibTeX and/or a "software" .bib file).
     - collect_library_entries(libraries, citation_types): merges the matching
-      software BibTeX entries into one BibliographyData, deduped by DOI,
-      optionally filtered to "paper" and/or "software".
-    - render_apa() / render_bibtex_strings_to_apa(): turn BibliographyData or
+      software BibTeX entries into a DataFrame, deduped by DOI, optionally
+      filtered to "paper" and/or "software".
+    - render_apa() / render_bibtex_strings_to_apa(): turn DataFrame rows or
       raw BibTeX strings (e.g. dataset citations) into APA text via the LLM.
     - generate_bibliography() / generate_bibliography_cell(): assemble the final
       bibliography (libraries + optional dataset BibTeX) as text or as a JSON
@@ -28,12 +28,21 @@ Implementation:
 import json
 import os
 import sys
+
+import bibtexparser
+import pandas as pd
 import yaml
-from pybtex.database import parse_file, parse_string, BibliographyData
+from bibtexparser.bibdatabase import BibDatabase
+from bibtexparser.bparser import BibTexParser
+from bibtexparser.bwriter import BibTexWriter
+from pybtex.database import BibliographyData
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
 _CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
+_DATAFRAME_COLUMNS = [
+    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+]
 
 
 def load_citation_index() -> dict:
@@ -43,29 +52,77 @@ def load_citation_index() -> dict:
         return yaml.safe_load(f)
 
 
-def _add_entries(source: BibliographyData, dest: BibliographyData, seen_dois: set) -> None:
-    """Merges entries from source into dest, deduplicating by DOI."""
-    for key, entry in source.entries.items():
-        doi = entry.fields.get("doi", "")
-        if doi and doi in seen_dois:
-            continue
-        if doi:
-            seen_dois.add(doi)
-        dest.entries[key] = entry
+def _bibtex_parser() -> BibTexParser:
+    """
+    Returns a BibTexParser configured to keep @software entries.
+
+    bibtexparser's default parser silently drops non-"standard" BibTeX entry
+    types (e.g. @software, used by every Zenodo software citation in
+    Citations/*.bib) unless ignore_nonstandard_types is disabled.
+    """
+    parser = BibTexParser(common_strings=True)
+    parser.ignore_nonstandard_types = False
+    return parser
+
+
+def _entry_to_bibtex(entry: dict) -> str:
+    """Re-serializes a single bibtexparser entry dict back to BibTeX text."""
+    db = BibDatabase()
+    db.entries = [entry]
+    return BibTexWriter().write(db).strip()
+
+
+def _add_entry_row(
+    rows: list[dict],
+    seen_dois: set[str],
+    library: str,
+    citation_type: str,
+    entry: dict,
+) -> None:
+    """
+    Appends one DataFrame row for entry, deduplicating by DOI.
+
+    Entries sharing a DOI with an already-added row are skipped; entries
+    without a DOI are never deduplicated against each other.
+    """
+    doi = entry.get("doi", "")
+    if doi and doi in seen_dois:
+        return
+    if doi:
+        seen_dois.add(doi)
+    rows.append({
+        "library": library,
+        "citation_type": citation_type,
+        "key": entry.get("ID", ""),
+        "title": entry.get("title", ""),
+        "author": entry.get("author", ""),
+        "year": entry.get("year", ""),
+        "doi": doi,
+        "bibtex": _entry_to_bibtex(entry),
+    })
 
 
 def collect_library_entries(
     libraries: list[str],
     citation_types: list[str] | None = None,
-) -> BibliographyData:
-    """Collects BibTeX entries for each library, deduplicating by DOI.
+) -> pd.DataFrame:
+    """
+    Collects citation entries for each library, deduplicating by DOI.
 
-    citation_types filters by type (e.g. ["paper"], ["software"]).
-    None means all types.
+    Args:
+        libraries: library names to look up in library_citations.yml
+        citation_types: optional filter - "paper" and/or "software"; None
+            means both
+
+    Returns:
+        a DataFrame with one row per citation entry (columns: library,
+        citation_type, key, title, author, year, doi, bibtex); a library
+        with both a paper and a software citation produces two rows
     """
     index = load_citation_index()
-    seen_dois = set()
-    merged = BibliographyData()
+    parser = _bibtex_parser()
+    seen_dois: set[str] = set()
+    rows: list[dict] = []
 
     for lib in libraries:
         lib_lower = lib.lower()
@@ -75,16 +132,18 @@ def collect_library_entries(
         lib_entry = index[lib_lower] or {}
 
         if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
-            paper_bib = parse_string(lib_entry["paper"], bib_format="bibtex")
-            _add_entries(paper_bib, merged, seen_dois)
+            entry = bibtexparser.loads(lib_entry["paper"], parser=parser).entries[0]
+            _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
             bib_path = os.path.join(_CITATIONS_DIR, f"{lib_lower}.bib")
             if os.path.exists(bib_path):
-                software_bib = parse_file(bib_path)
-                _add_entries(software_bib, merged, seen_dois)
+                with open(bib_path) as f:
+                    entries = bibtexparser.load(f, parser=parser).entries
+                for entry in entries:
+                    _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
 
-    return merged
+    return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
 
 def render_apa(bib_data: BibliographyData) -> str:
