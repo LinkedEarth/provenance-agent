@@ -97,3 +97,16 @@ def test_render_apa_calls_llm_per_row_and_joins(monkeypatch):
     df = collect_library_entries(["pyleoclim"], citation_types=["software"])
     out = bibliography.render_apa(df)
     assert out.startswith("APA[@software{pyleoclim_")
+
+
+def test_generate_bibliography_includes_library_citation(monkeypatch):
+    import llm
+    monkeypatch.setattr(llm, "bibtex_to_apa", lambda bibtex: "APA_CITATION")
+
+    out = bibliography.generate_bibliography(["pyleoclim"])
+    assert "APA_CITATION" in out
+
+
+def test_generate_bibliography_reports_unknown_library():
+    out = bibliography.generate_bibliography(["definitely_not_a_real_library"])
+    assert "No citation found for: definitely_not_a_real_library" in out

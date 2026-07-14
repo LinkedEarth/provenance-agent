@@ -214,7 +214,7 @@ def generate_bibliography(
     index = load_citation_index()
     entries = collect_library_entries(libraries, citation_types)
 
-    if entries.entries:
+    if not entries.empty:
         parts.append(render_apa(entries))
 
     not_found = [lib for lib in libraries
