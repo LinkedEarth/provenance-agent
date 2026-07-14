@@ -37,7 +37,6 @@ import yaml
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.bwriter import BibTexWriter
-from pybtex.database import BibliographyData
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
