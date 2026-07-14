@@ -9,7 +9,7 @@ Purpose:
 
 Implementation:
     - cite_software(notebook_path, libraries, citation_types, fmt): in-process.
-      parse_notebook -> collect_library_entries -> render_apa (when fmt="apa").
+      parse_notebook -> collect_library_entries (returns pd.DataFrame) -> render_apa (when fmt="apa").
     - cite_data(notebook_path, targets, fmt, output_path): wraps
       generate_data_workflow, which injects a retrieval cell per dataset whose
       output is the citation. Data citations exist as cell output, not a return
@@ -70,7 +70,7 @@ def cite_software(
     if fmt == "apa":
         body = render_apa(entries)
     else:
-        body = entries.to_string(bib_format="bibtex")
+        body = "\n\n".join(entries["bibtex"])
 
     if not_found:
         notes = "\n".join(f"[Not imported in notebook: {lib}]" for lib in not_found)
