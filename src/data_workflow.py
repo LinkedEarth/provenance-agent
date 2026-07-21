@@ -22,7 +22,8 @@ Implementation:
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
       from the endpoint, then calls get_bibtex(). When fmt="apa", the cell pipes
       the collected BibTeX to bibliography.render_bibtex_strings_to_apa() for
-      APA rendering in-kernel.
+      APA rendering in-kernel. Every cell also display()s the metadata DataFrame
+      that get_bibtex()/get_publications() return alongside the BibTeX.
     - filter_datasets(pairs, tool, variable): narrows the detected pairs so the
       workflow can cite all datasets, only one tool's datasets, or one variable.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt): appends one retrieval code
@@ -41,6 +42,10 @@ Design decisions:
       rather than silently producing an empty bibliography.
     - APA rendering happens in the injected cell (via render_bibtex_strings_to_apa)
       so the user can see formatted citations as output without re-running code.
+    - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
+      (citations, metadata DataFrame). The cell binds that DataFrame to
+      _meta_{variable} and displays it, so the per-dataset metadata behind each
+      citation is visible instead of being dropped on the floor.
 """
 
 import ast
@@ -109,7 +114,7 @@ def build_retrieval_cell(
 
     Returns:
         Python source that, run in the notebook's kernel, prints the dataset's
-        citations
+        citations and displays the accompanying metadata DataFrame
 
     Raises:
         ValueError: if tool is not one of the supported dataset sources
@@ -117,10 +122,10 @@ def build_retrieval_cell(
     t = tool.lower()
 
     if t == "pylipd":
-        body = f"_bib_{variable}, _ = {variable}.get_bibtex(remote=True)\n"
+        body = f"_bib_{variable}, _meta_{variable} = {variable}.get_bibtex(remote=True)\n"
     elif t == "pyleotups":
         body = (
-            f"_pub_{variable}, _ = {variable}.get_publications()\n"
+            f"_pub_{variable}, _meta_{variable} = {variable}.get_publications()\n"
             f'_bib_{variable} = [_pub_{variable}.to_string(bib_format="bibtex")]\n'
         )
     elif t == "lipdgraph":
@@ -130,7 +135,7 @@ def build_retrieval_cell(
             f"_lipd_{variable} = LiPD()\n"
             f'_lipd_{variable}.set_endpoint("{endpoint or _LIPDVERSE_ENDPOINT}")\n'
             f"_lipd_{variable}.load_remote_datasets(_names_{variable})\n"
-            f"_bib_{variable}, _ = _lipd_{variable}.get_bibtex(remote=True)\n"
+            f"_bib_{variable}, _meta_{variable} = _lipd_{variable}.get_bibtex(remote=True)\n"
         )
     else:
         raise ValueError(f"Unsupported dataset tool: {tool!r}")
@@ -138,12 +143,12 @@ def build_retrieval_cell(
     if fmt == "apa":
         out = (
             "from bibliography import render_bibtex_strings_to_apa\n"
-            f"print(render_bibtex_strings_to_apa(_bib_{variable}))"
+            f"print(render_bibtex_strings_to_apa(_bib_{variable}))\n"
         )
     else:
-        out = f'print("\\n".join(_bib_{variable}))'
+        out = f'print("\\n".join(_bib_{variable}))\n'
 
-    return body + out
+    return body + out + f"display(_meta_{variable})"
 
 
 def filter_datasets(

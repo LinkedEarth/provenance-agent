@@ -69,6 +69,13 @@ def test_unsupported_tool_raises():
         build_retrieval_cell("iso_ds", "xarray")
 
 
+@pytest.mark.parametrize("tool", ["PyLiPD", "PyleoTUPS", "LiPDGraph"])
+def test_every_cell_displays_the_metadata_dataframe(tool):
+    cell = build_retrieval_cell("D", tool)
+    assert "_meta_D" in cell
+    assert "display(_meta_D)" in cell
+
+
 # --- extract_lipdgraph_endpoint ----------------------------------------------
 
 def test_extract_endpoint_from_url_assignment():
@@ -143,7 +150,7 @@ def test_inject_appends_one_code_cell_per_pair():
 
 def test_pylipd_cell_apa_renders_via_bibliography():
     cell = build_retrieval_cell("D", "PyLiPD", fmt="apa")
-    assert "_bib_D, _ = D.get_bibtex(remote=True)" in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
     assert "from bibliography import render_bibtex_strings_to_apa" in cell
     assert "print(render_bibtex_strings_to_apa(_bib_D))" in cell
 
