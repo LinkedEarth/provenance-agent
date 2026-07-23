@@ -1,0 +1,21 @@
+notebook: notebooks/comparing-simulated-reconstructed-climate/widget_primer.ipynb
+software:
+  - ipywidgets
+  - matplotlib
+  - pyleoclim
+  - seaborn
+  - sys
+  - xarray
+datasets:
+  - variable: lmr_ds_ungridded
+    tool: xarray
+notes: |
+  One external source: lmr_ds_ungridded, the LMRv2.1 ungridded ensemble zarr from
+  Pangeo-Forge opened with xr.open_dataset. The widget demos are driven by real
+  data, not synthetic arrays, so datasets is non-empty. Judgment call: the data is
+  immediately converted to a pandas DataFrame (df) via to_dataframe(), and df is
+  what the pyleoclim/seaborn analysis consumes - but a DataFrame is not the same
+  object family as the xarray Dataset source, so the terminal dataset variable is
+  lmr_ds_ungridded itself (the last variable in the xarray family). If DataFrame
+  conversions were considered same-family, df would be the terminal instead.
+  sys is imported but unused; it still counts as imported software.

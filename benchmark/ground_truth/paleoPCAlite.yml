@@ -1,0 +1,33 @@
+notebook: notebooks/testing/paleoPCAlite.ipynb
+software:
+  - ast
+  - cartopy
+  - eofs
+  - fsspec
+  - glob
+  - io
+  - json
+  - matplotlib
+  - nc_time_axis
+  - numpy
+  - pandas
+  - pathlib
+  - pyleoclim
+  - requests
+  - s3fs
+  - xarray
+datasets:
+  - variable: filtered_df2
+    tool: LiPDGraph
+notes: |
+  The LiPDGraph SPARQL results land in df_res (pd.read_csv of a requests.post
+  response to linkedearth.graphdb.mint.isi.edu), then flow through a chain of
+  filtered copies: df -> filtered_df -> filt_df -> filtered_df2. Only
+  filtered_df2 is iterated to build the pyleoclim GeoSeries used for the PCA
+  analysis, so per the "copied to a new name and only the new name is analyzed"
+  rule the terminal dataset variable is filtered_df2 (still a DataFrame), not
+  df_res. The downstream mgs/mgs_common/pca objects are pyleoclim conversions
+  and derived results, so they are excluded.
+  Several imports (s3fs, fsspec, xarray, glob, ast, pathlib, eofs,
+  nc_time_axis) are never used in this lite notebook's code, but they appear
+  on import lines so they are listed. This notebook has no %%-magic cells.

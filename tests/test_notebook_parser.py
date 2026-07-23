@@ -100,6 +100,30 @@ def test_extract_syntax_error_returns_empty():
     assert extract_libraries("def broken(:\n    pass") == set()
 
 
+def test_extract_recovers_imports_from_broken_cell():
+    # Mirrors a real notebook cell (C02_b cell 18): the docstring is indented
+    # 3 spaces but the body 4, an IndentationError - the imports above the
+    # broken function must still be recovered.
+    code = (
+        "import cfr.psm as psm\n"
+        "from tqdm import tqdm\n"
+        "def f():\n"
+        '   """doc"""\n'
+        "    for x in y:\n"
+        "        pass\n"
+    )
+    assert extract_libraries(code) == {"cfr", "tqdm"}
+
+
+def test_extract_recovers_multi_import_line_from_broken_cell():
+    assert extract_libraries("import os, json\ndef broken(:\n    pass") == {"os", "json"}
+
+
+def test_extract_recovers_parenthesized_from_import_in_broken_cell():
+    code = "from pylipd.lipd import (\n    LiPD,\n)\ndef broken(:\n    pass"
+    assert extract_libraries(code) == {"pylipd"}
+
+
 def test_extract_empty_cell_returns_empty():
     assert extract_libraries("") == set()
 
@@ -117,23 +141,14 @@ def test_extract_import_inside_function():
 # parse_notebook — sample.ipynb
 # ---------------------------------------------------------------------------
 
-def test_parse_returns_dict():
-    assert isinstance(parse_notebook(SAMPLE), dict)
-
-
-def test_parse_has_expected_keys():
-    result = parse_notebook(SAMPLE)
-    assert "libraries" in result and "datasets" in result
-
-
-def test_parse_libraries_is_sorted_list():
-    libs = parse_notebook(SAMPLE)["libraries"]
+def test_parse_returns_sorted_list():
+    libs = parse_notebook(SAMPLE)
     assert isinstance(libs, list)
     assert libs == sorted(libs)
 
 
 def test_parse_libraries_contains_expected():
-    libs = parse_notebook(SAMPLE)["libraries"]
+    libs = parse_notebook(SAMPLE)
     for expected in ("numpy", "pandas", "matplotlib", "pyleoclim"):
         assert expected in libs
 
@@ -143,6 +158,6 @@ def test_parse_libraries_contains_expected():
 # ---------------------------------------------------------------------------
 
 def test_parse_magic_notebook_extracts_imports_despite_magic():
-    libs = parse_notebook(MAGIC_NB)["libraries"]
+    libs = parse_notebook(MAGIC_NB)
     for expected in ("numpy", "pandas", "pyleoclim", "scipy"):
         assert expected in libs, f"expected '{expected}' in libraries but got {libs}"

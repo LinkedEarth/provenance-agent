@@ -12,7 +12,7 @@ It should extract content and identify imported libraries, imported data, and wh
 
 This AI agent serves as a prototype for a larger agent that in addition to data/library identification will be able to: prompt the user if a citation cannot be found and update context appropriately, and help user deposit their own data when used in a notebook.
 
-Although this agent serves as a prototype for future integration into PaleoPAL, it is seperate from the three main PaleoPAL agents, and will automate the tedious task of manual citation.
+Although this agent serves as a prototype for future integration into PaleoPAL, it is separate from the three main PaleoPAL agents, and will automate the tedious task of manual citation.
 
 
 

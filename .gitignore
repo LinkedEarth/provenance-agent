@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+benchmark/results/
 CLAUDE.md
 .DS_Store
 src/.env
+.worktrees/
+docs/superpowers/

@@ -1,0 +1,26 @@
+notebook: notebooks/comparing-simulated-reconstructed-climate/data_from_esm_cloudcat.ipynb
+software:
+  - cftime
+  - collections
+  - intake
+  - nc_time_axis
+  - numpy
+  - pandas
+  - pyleoclim
+  - xarray
+datasets:
+  - variable: da
+    tool: xarray
+notes: |
+  Single external source: the Pangeo CMIP6 cloud catalog opened with
+  intake.open_esm_datastore (col). Flow: col -> search_res -> _esm_data_d /
+  esm_data_d (dicts of xarray Datasets) -> _ds (xr.concat of past1000+historical)
+  -> da (DataArray fed to pyleo.Series). The dicts and intermediate names are not
+  the analyzed terminals; da is what every pyleo.Series analysis consumes, so it is
+  recorded as the terminal variable. Judgment calls: (1) da is reassigned three
+  times (MRI 'tas', MIROC 'ta', and again inside the loop in the segments cell) -
+  all reassignments are the same source/family, so one entry suffices; (2) labeled
+  xarray rather than intake because the terminal object is an xarray DataArray,
+  per the type-of-terminal-variable convention; the loader is intake-esm.
+  col.df is only used for catalog exploration (pivot tables of search results),
+  not scientific analysis, so no separate intake entry is recorded.

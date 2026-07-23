@@ -1,122 +1,128 @@
 """
-Generates an APA 7th edition bibliography for libraries found in a Jupyter
-Notebook.
+Bibliography assembly and APA rendering - the output stage where the software
+and data workflows converge into one bibliography.
 
-Citation data is stored in Citations/library_citations.yml, a nested dict
-(loaded via PyYAML) that maps each library name to an optional inlined
-paper BibTeX entry and an optional software .bib filename. Paper DOIs are
-extracted from the inlined BibTeX using pybtex; software DOIs are read
-from the referenced .bib files, also via pybtex.
+Two layers, and only one of them is software-specific:
+  - Collection (software-specific here): looks up a notebook's imported
+    libraries in Citations/ (a YAML index plus per-library .bib files) and
+    merges their BibTeX, deduped by DOI. Dataset citations are collected
+    elsewhere - by the data workflow (data_workflow.py), which runs
+    get_bibtex()/get_publications() in the notebook's live kernel.
+  - Rendering/assembly (shared by both workflows): turns BibTeX into APA via
+    the LLM and assembles the final bibliography. Dataset BibTeX from the data
+    workflow is folded in as strings via the dataset_bibtex argument.
 
-Once DOIs are collected, each is sent to doi.org with an Accept header
-requesting APA-formatted plain text (content negotiation). This avoids
-storing pre-formatted citations and always returns the canonical APA
-string from the DOI registrar. The trade-off is that an HTTP request is
-made per DOI, so bibliography generation requires network access.
-
-The main entry point is add_bibliography_to_notebook(), which chains
-notebook_parser.parse_notebook() -> collect_dois() -> doi_to_apa() and
-appends the result as a markdown cell to the notebook via nbformat.
+Implementation:
+    - load_citation_index(): loads library_citations.yml (library name -> its
+      inline "paper" BibTeX and/or a "software" .bib file).
+    - collect_library_entries(libraries, citation_types): merges the matching
+      software BibTeX entries into a DataFrame, deduped by DOI, optionally
+      filtered to "paper" and/or "software".
+    - render_apa(entries): takes the DataFrame from collect_library_entries()
+      and converts each entry's BibTeX to APA via the LLM.
+    - render_bibtex_strings_to_apa(): turns raw BibTeX strings (e.g. dataset
+      citations) into APA text via the LLM.
+    - generate_bibliography() / generate_bibliography_cell(): assemble the final
+      bibliography (libraries + optional dataset BibTeX) as text or as a JSON
+      notebook markdown cell.
 """
 
+import json
 import os
-import re
 import sys
+
+import bibtexparser
+import pandas as pd
 import yaml
-import requests
-import nbformat
-from pybtex.database import parse_file, parse_string
+from bibtexparser.bibdatabase import BibDatabase
+from bibtexparser.bparser import BibTexParser
+from bibtexparser.bwriter import BibTexWriter
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
 _CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
+_DATAFRAME_COLUMNS = [
+    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+]
 
 
-def load_citation_index(citations_dir: str = _CITATIONS_DIR) -> dict:
-    """
-    Loads library_citations.yml and returns it as a nested dict mapping
-    library names to their citation entries (paper BibTeX and/or software
-    .bib filename).
-
-    Args:
-        citations_dir: path to the Citations/ directory
-
-    Returns:
-        dict mapping library name strings to dicts with optional "paper"
-        and "software" keys
-    """
-    yml_path = os.path.join(citations_dir, "library_citations.yml")
+def load_citation_index() -> dict:
+    """Loads library_citations.yml mapping library names to BibTeX keys."""
+    yml_path = os.path.join(_CITATIONS_DIR, "library_citations.yml")
     with open(yml_path) as f:
         return yaml.safe_load(f)
 
 
-def _extract_doi_from_bibtex(bibtex_str: str) -> str | None:
+def _bibtex_parser() -> BibTexParser:
     """
-    Extracts the DOI field from a BibTeX string. Parses the BibTeX with
-    pybtex and returns the first DOI found across all entries.
+    Returns a BibTexParser configured to keep @software entries.
 
-    Args:
-        bibtex_str: raw BibTeX string (e.g. from the "paper" field in the YAML)
-
-    Returns:
-        DOI string, or None if no DOI field is present
+    bibtexparser's default parser silently drops non-"standard" BibTeX entry
+    types (e.g. @software, used by every Zenodo software citation in
+    Citations/*.bib) unless ignore_nonstandard_types is disabled.
     """
-    bib = parse_string(bibtex_str, bib_format="bibtex")
-    for entry in bib.entries.values():
-        doi = entry.fields.get("doi", "")
-        if doi:
-            return doi
-    return None
+    parser = BibTexParser(common_strings=True)
+    parser.ignore_nonstandard_types = False
+    return parser
 
 
-def doi_to_apa(doi: str) -> str | None:
+def _entry_to_bibtex(entry: dict) -> str:
+    """Re-serializes a single bibtexparser entry dict back to BibTeX text."""
+    db = BibDatabase()
+    db.entries = [entry]
+    return BibTexWriter().write(db).strip()
+
+
+def _add_entry_row(
+    rows: list[dict],
+    seen_dois: set[str],
+    library: str,
+    citation_type: str,
+    entry: dict,
+) -> None:
     """
-    Fetches an APA 7th edition formatted citation from doi.org using
-    content negotiation. Sends a GET request with an Accept header for
-    APA-style plain text.
+    Appends one DataFrame row for entry, deduplicating by DOI.
 
-    Args:
-        doi: DOI string (e.g. "10.1038/s41586-020-2649-2")
-
-    Returns:
-        APA citation string, or None if the request fails
+    Entries sharing a DOI with an already-added row are skipped; entries
+    without a DOI are never deduplicated against each other.
     """
-    r = requests.get(
-        f"https://doi.org/{doi}",
-        headers={"Accept": "text/x-bibliography; style=apa"},
-        timeout=10,
-    )
-    if r.status_code != 200:
-        return None
-    r.encoding = "utf-8"
-    text = r.text.strip()
-    # doi.org sometimes returns HTML italic tags for software titles
-    text = re.sub(r"</?i>", "", text)
-    return text
+    doi = entry.get("doi", "")
+    if doi and doi in seen_dois:
+        return
+    if doi:
+        seen_dois.add(doi)
+    rows.append({
+        "library": library,
+        "citation_type": citation_type,
+        "key": entry.get("ID", ""),
+        "title": entry.get("title", ""),
+        "author": entry.get("author", ""),
+        "year": entry.get("year", ""),
+        "doi": doi,
+        "bibtex": _entry_to_bibtex(entry),
+    })
 
 
-def collect_dois(
+def collect_library_entries(
     libraries: list[str],
-    citations_dir: str = _CITATIONS_DIR,
     citation_types: list[str] | None = None,
-) -> list[str]:
+) -> pd.DataFrame:
     """
-    Collects unique DOIs for a list of libraries by looking up each in
-    library_citations.yml. Paper DOIs are extracted from inlined BibTeX;
-    software DOIs are read from the .bib file referenced in the YAML.
+    Collects citation entries for each library, deduplicating by DOI.
 
     Args:
-        libraries: list of library name strings (e.g. from notebook_parser)
-        citations_dir: path to the Citations/ directory
-        citation_types: optional filter — list containing "paper" and/or
-            "software". If None, both types are collected.
+        libraries: library names to look up in library_citations.yml
+        citation_types: optional filter - "paper" and/or "software"; None
+            means both
 
     Returns:
-        list of unique DOI strings, in the order they were encountered
+        a DataFrame with one row per citation entry (columns: library,
+        citation_type, key, title, author, year, doi, bibtex); a library
+        with both a paper and a software citation produces two rows
     """
-    index = load_citation_index(citations_dir)
-    seen = set()
-    dois = []
+    index = load_citation_index()
+    seen_dois: set[str] = set()
+    rows: list[dict] = []
 
     for lib in libraries:
         lib_lower = lib.lower()
@@ -126,95 +132,128 @@ def collect_dois(
         lib_entry = index[lib_lower] or {}
 
         if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
-            doi = _extract_doi_from_bibtex(lib_entry["paper"])
-            if doi and doi not in seen:
-                seen.add(doi)
-                dois.append(doi)
+            entry = bibtexparser.loads(lib_entry["paper"], parser=_bibtex_parser()).entries[0]
+            _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
-            software_file = lib_entry.get("software")
-            if software_file:
-                bib_path = os.path.join(citations_dir, software_file)
-                if os.path.exists(bib_path):
-                    bib_data = parse_file(bib_path)
-                    for entry in bib_data.entries.values():
-                        doi = entry.fields.get("doi", "")
-                        if doi and doi not in seen:
-                            seen.add(doi)
-                            dois.append(doi)
+            bib_path = os.path.join(_CITATIONS_DIR, f"{lib_lower}.bib")
+            if os.path.exists(bib_path):
+                with open(bib_path) as f:
+                    entries = bibtexparser.load(f, parser=_bibtex_parser()).entries
+                for entry in entries:
+                    _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
 
-    return dois
+    return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
+
+
+def render_apa(entries: pd.DataFrame) -> str:
+    """
+    Converts collected citation entries to APA 7th edition plain text by
+    sending each entry's BibTeX through the LLM.
+
+    Args:
+        entries: DataFrame from collect_library_entries(), must have a
+            "bibtex" column
+
+    Returns:
+        APA-formatted citation string with entries separated by blank lines
+    """
+    from llm import bibtex_to_apa
+
+    citations = [bibtex_to_apa(bibtex) for bibtex in entries["bibtex"]]
+    return "\n\n".join(citations)
+
+
+def render_bibtex_strings_to_apa(bibtex_strings: list[str]) -> str:
+    """
+    Converts raw BibTeX strings to APA via the LLM.
+    Used for dataset citations produced by the data workflow (data_workflow.py),
+    which returns BibTeX as strings from get_bibtex() / get_publications().
+
+    Args:
+        bibtex_strings: list of BibTeX entry strings
+
+    Returns:
+        APA-formatted citation string with entries separated by blank lines
+    """
+    from llm import bibtex_to_apa
+
+    citations = []
+    for bibtex_str in bibtex_strings:
+        apa = bibtex_to_apa(bibtex_str.strip())
+        citations.append(apa)
+
+    return "\n\n".join(citations)
 
 
 def generate_bibliography(
     libraries: list[str],
-    citations_dir: str = _CITATIONS_DIR,
     citation_types: list[str] | None = None,
+    dataset_bibtex: list[str] | None = None,
 ) -> str:
     """
-    Produces a full APA bibliography string for a list of library names.
-    Collects DOIs, fetches APA citations from doi.org, and appends
-    placeholder lines for any libraries not found in the citation index.
+    Produces a bibliography string for a notebook's imported libraries.
+    Collects library citations from local YAML/.bib files and renders them
+    to APA. Dataset citations are not collected here — the data workflow
+    produces them and they can be folded in via dataset_bibtex.
 
     Args:
-        libraries: list of library name strings
-        citations_dir: path to the Citations/ directory
-        citation_types: optional filter — "paper" and/or "software"
+        libraries: imported library names (from parse_notebook())
+        citation_types: optional filter for library citations —
+            "paper" and/or "software"
+        dataset_bibtex: optional list of BibTeX strings for dataset
+            citations, produced by the data workflow (data_workflow.py)
 
     Returns:
-        formatted bibliography string with citations separated by blank
-        lines, followed by any "[No citation found]" placeholders
+        formatted bibliography string
     """
-    index = load_citation_index(citations_dir)
-    dois = collect_dois(libraries, citations_dir, citation_types)
+    parts = []
 
-    citations = []
-    for doi in dois:
-        apa = doi_to_apa(doi)
-        if apa:
-            citations.append(apa)
+    # Library citations
+    index = load_citation_index()
+    entries = collect_library_entries(libraries, citation_types)
+
+    if not entries.empty:
+        parts.append(render_apa(entries))
 
     not_found = [lib for lib in libraries
                  if lib.lower() not in index and lib not in _STDLIB_MODULES]
-
-    parts = []
-    if citations:
-        parts.append("\n\n".join(citations))
     if not_found:
-        placeholders = "\n".join(f"[No citation found for: {lib}]" for lib in not_found)
-        parts.append(placeholders)
+        parts.append("\n".join(f"[No citation found for: {lib}]" for lib in not_found))
+
+    # Dataset citations (produced by the data workflow)
+    if dataset_bibtex:
+        parts.append(render_bibtex_strings_to_apa(dataset_bibtex))
 
     return "\n\n".join(parts)
 
 
-def add_bibliography_to_notebook(notebook_path: str, citations_dir: str = _CITATIONS_DIR) -> None:
+def generate_bibliography_cell(
+    libraries: list[str],
+    citation_types: list[str] | None = None,
+    dataset_bibtex: list[str] | None = None,
+) -> str:
     """
-    End-to-end entry point. Parses a notebook for library imports,
-    generates an APA bibliography, and appends it as a new markdown
-    cell at the end of the notebook.
+    Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
+    The returned JSON string can be parsed and appended to a notebook's cell
+    list.
 
     Args:
-        notebook_path: file path to a .ipynb notebook
-        citations_dir: path to the Citations/ directory
+        libraries: imported library names (from parse_notebook())
+        citation_types: optional filter for library citations
+        dataset_bibtex: optional list of BibTeX strings for dataset
+            citations, produced by the data workflow (data_workflow.py)
 
     Returns:
-        None (modifies the notebook file in place)
+        JSON string representing a notebook markdown cell with the bibliography
     """
-    sys.path.insert(0, os.path.dirname(__file__))
-    from notebook_parser import parse_notebook
-
-    result = parse_notebook(notebook_path)
-    bib_text = generate_bibliography(result["libraries"], citations_dir)
-
-    with open(notebook_path) as f:
-        nb = nbformat.read(f, as_version=4)
-
-    cell_source = "## Bibliography\n\n" + bib_text
-    new_cell = nbformat.v4.new_markdown_cell(source=cell_source)
-    nb.cells.append(new_cell)
-
-    with open(notebook_path, "w") as f:
-        nbformat.write(nb, f)
+    bib_text = generate_bibliography(libraries, citation_types, dataset_bibtex)
+    cell = {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [f"## Bibliography\n\n{bib_text}"],
+    }
+    return json.dumps(cell, indent=2)
 
 
 if __name__ == "__main__":
@@ -222,5 +261,10 @@ if __name__ == "__main__":
         print("Usage: python bibliography.py <path_to_notebook.ipynb>")
         sys.exit(1)
 
-    add_bibliography_to_notebook(sys.argv[1])
-    print(f"Bibliography appended to {sys.argv[1]}")
+    sys.path.insert(0, os.path.dirname(__file__))
+    from notebook_parser import parse_notebook
+
+    notebook_path = sys.argv[1]
+    result = parse_notebook(notebook_path)
+    bib_text = generate_bibliography(result)
+    print(bib_text)

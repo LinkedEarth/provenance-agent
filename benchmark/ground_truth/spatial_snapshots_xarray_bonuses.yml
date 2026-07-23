@@ -1,0 +1,23 @@
+notebook: notebooks/comparing-simulated-reconstructed-climate/spatial_snapshots_xarray_bonuses.ipynb
+software:
+  - cartopy
+  - cftime
+  - intake
+  - matplotlib
+  - numpy
+  - pyleoclim
+datasets:
+  - variable: miroc_ds
+    tool: xarray
+notes: |
+  Single external source: the Pangeo CMIP6 cloud catalog via
+  intake.open_esm_datastore (col). search_res here is already the dict returned by
+  to_dataset_dict; miroc_ds = list(search_res.values())[0] is the xarray Dataset
+  that all analysis (assign, climatology, anomalies, global mean, snapshot
+  selection) runs on, with repeated reassignment back to miroc_ds. snapshot_data
+  and miroc_climatology are derived selections/reductions, so miroc_ds stays the
+  terminal variable. Judgment call: labeled xarray because the terminal object is
+  an xarray Dataset (type-of-terminal-variable convention), even though xarray is
+  never imported in this notebook - the Dataset arrives entirely through
+  intake-esm; `intake` would be the alternative label. The first import cell
+  begins with %load_ext (a line magic, not %%), so its imports count.

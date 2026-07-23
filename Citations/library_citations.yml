@@ -39,6 +39,8 @@ numpy:
       url       = {https://doi.org/10.1038/s41586-020-2649-2}
     }
 
+## numpy does not have a separate software citation file, can possibly add the software version in () after the APA citation
+
 matplotlib:
   paper: |
     @Article{Hunter:2007,

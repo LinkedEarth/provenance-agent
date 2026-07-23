@@ -1,0 +1,33 @@
+notebook: notebooks/comparing-simulated-reconstructed-climate/VICS_dashboard.ipynb
+software:
+  - cartopy
+  - cftime
+  - ipywidgets
+  - matplotlib
+  - numpy
+  - os
+  - pathlib
+  - xarray
+datasets:
+  - variable: vol_ds
+    tool: xarray
+  - variable: lmr_ds_gridded_mean
+    tool: xarray
+notes: |
+  Two external sources:
+  1. vol_ds: xr.open_dataset of local data/eVolv2k_v3_EVA_AOD_-500_1900_1.nc
+     (downloaded eVolv2k volcanic AOD dataset). vol_ds is reassigned with assign/
+     set_coords and analyzed directly (slices, colorbar limits, pcolor plots in the
+     dashboard), so it is the terminal variable. vol_ds_weighted / vol_ds_year_wm
+     are derived (lat-weighted annual means) used only for the AOD timeseries
+     panel, so they are treated as computed results, not separate terminals.
+  2. lmr_ds_gridded: LMRv2.1 gridded ensemble zarr from Pangeo-Forge via
+     xr.open_dataset. Judgment call: lmr_ds_gridded is only used once to compute
+     lmr_ds_gridded_mean (mean over MCrun), and every subsequent analysis
+     (rolling means, demeaned composites, all map panels) uses
+     lmr_ds_gridded_mean, so the mean Dataset is recorded as terminal per the
+     "only the new name is analyzed" rule; lmr_ds_gridded itself is a defensible
+     alternative since the mean is arguably a derived product.
+  cftime is imported but unused; it still counts as imported software. The
+  %matplotlib ipympl line magics do not suppress their cells (only %% cell magics
+  would), and no imports occur in those cells anyway.
