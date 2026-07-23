@@ -5,4 +5,4 @@ CLAUDE.md
 .DS_Store
 src/.env
 .worktrees/
-docs/superpowers/specs/
+docs/superpowers/
