@@ -166,3 +166,36 @@ def test_bibtex_fmt_is_unchanged_default():
     cell = build_retrieval_cell("D", "PyLiPD")
     assert 'print("\\n".join(_bib_D))' in cell
     assert "render_bibtex_strings_to_apa" not in cell
+
+
+# --- cross-workflow integration -----------------------------------------------
+
+def test_software_then_data_leaves_one_combine_cell_last(tmp_path, monkeypatch):
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda code: [["filtered_df2", "LiPDGraph"]],
+    )
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "import pyleoclim\n"
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "filtered_df2 = None"
+    ))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    from software_workflow import generate_software_workflow
+    from data_workflow import generate_data_workflow
+
+    generate_software_workflow(str(path))
+    generate_data_workflow(str(path))
+
+    final = nbformat.read(str(path), as_version=4)
+    marked = [c for c in final.cells if "# provenance-combine-cell" in c.source]
+    assert len(marked) == 1
+    assert final.cells[-1] is marked[0]
+    assert any("_provbib_software" in c.source for c in final.cells)
+    assert any("_provbib_data_filtered_df2" in c.source for c in final.cells)
