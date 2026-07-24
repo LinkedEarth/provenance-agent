@@ -56,9 +56,10 @@ def test_cell_passes_citation_types_filter():
     assert "['pyleoclim'], ['software']" in cell
 
 
-def test_cell_displays_the_dataframe():
+def test_cell_binds_provbib_software_and_has_no_display():
     cell = build_metadata_cell(["pyleoclim"])
-    assert "display(_software_meta)" in cell
+    assert "_provbib_software = collect_library_entries(['pyleoclim'], None)" in cell
+    assert "display(" not in cell
 
 
 # --- inject_metadata_cell ----------------------------------------------------
@@ -80,7 +81,8 @@ def test_generate_all_libraries_injects_and_returns_them(tmp_path):
     assert "pyleoclim" in wanted
 
     nb = nbformat.read(str(out), as_version=4)
-    assert "collect_library_entries(" in nb.cells[-1].source
+    assert "# provenance-combine-cell" in nb.cells[-1].source
+    assert any("collect_library_entries(" in c.source for c in nb.cells)
 
 
 def test_generate_one_library_filters(tmp_path):
@@ -89,7 +91,7 @@ def test_generate_one_library_filters(tmp_path):
     assert wanted == ["pyleoclim"]
 
     nb = nbformat.read(str(out), as_version=4)
-    assert "['pyleoclim']" in nb.cells[-1].source
+    assert any("['pyleoclim']" in c.source for c in nb.cells)
 
 
 def test_generate_unimported_library_returns_empty_and_leaves_notebook(tmp_path):

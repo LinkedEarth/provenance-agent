@@ -7,23 +7,28 @@ Purpose:
     workflow injects one retrieval cell per dataset (each calling a library
     method on a live kernel object), the software workflow injects a single cell
     that, when run, builds a pandas DataFrame of the software citations' metadata
-    and display()s it. Both workflows now share the same shape: analyze the
-    notebook, append cell(s) with nbformat, write the notebook back, and let the
-    user run the injected cell(s) to see the result as cell output.
+    and binds it to _provbib_software. Both workflows now share the same shape:
+    analyze the notebook, append cell(s) with nbformat, append the shared combine
+    cell (bibliography.ensure_combine_cell) that displays every _provbib_*
+    variable as one combined frame, write the notebook back, and let the user run
+    the injected cells to see the result as cell output.
 
 Implementation:
     - build_metadata_cell(libraries, citation_types): returns the Python source
       for the injected cell. The cell imports collect_library_entries from
-      bibliography and calls it on the baked-in library list, then display()s the
-      resulting DataFrame. collect_library_entries parses the local Citations/
-      .bib files with bibtexparser, so the DataFrame columns (library,
-      citation_type, key, title, author, year, doi, bibtex) are the parsed
-      metadata of each BibTeX entry.
+      bibliography and calls it on the baked-in library list, binding the result
+      to _provbib_software (no display() call - the combine cell handles that).
+      collect_library_entries parses the local Citations/ .bib files with
+      bibtexparser, so the DataFrame columns (library, citation_type, key,
+      title, author, year, doi, bibtex) are the parsed metadata of each BibTeX
+      entry.
     - inject_metadata_cell(nb, libraries, citation_types): appends that single
       code cell to an nbformat notebook node.
     - generate_software_workflow(notebook_path, libraries, citation_types,
       output_path): top-level glue - parse the imports, optionally filter to the
-      requested libraries, inject the cell, and write the notebook back.
+      requested libraries, inject the metadata cell, append/refresh the shared
+      combine cell via bibliography.ensure_combine_cell, and write the notebook
+      back.
 
 Design decisions:
     - The cell imports from bibliography rather than baking the collected BibTeX
@@ -34,9 +39,9 @@ Design decisions:
     - One cell for all libraries (not one per library like the data workflow),
       because all software citations resolve to a single DataFrame - there is no
       per-library live object to reuse.
-    - Citations are surfaced as the injected cell's OUTPUT, not as this module's
+    - Citations are surfaced as the combine cell's OUTPUT, not as this module's
       return value, so the contract matches cite_data: the return value is the
-      list of libraries the cell was built for.
+      list of libraries the metadata cell was built for.
     - When no libraries match (empty notebook or a filter that hits nothing), no
       cell is injected and the notebook is left untouched, mirroring the data
       workflow's "nothing detected" path.
@@ -58,15 +63,16 @@ def build_metadata_cell(
             both
 
     Returns:
-        Python source that, run in the notebook's kernel, builds a pandas
-        DataFrame of the libraries' citation metadata and display()s it. The
+        Python source that, run in the notebook's kernel, binds
+        _provbib_software to a pandas DataFrame of the libraries' citation
+        metadata. It does not display() the frame - the combine cell appended
+        by generate_software_workflow displays the combined frame instead. The
         cell imports collect_library_entries from bibliography, so src/ must be
         on the kernel's sys.path.
     """
     return (
         "from bibliography import collect_library_entries\n"
-        f"_software_meta = collect_library_entries({libraries!r}, {citation_types!r})\n"
-        "display(_software_meta)"
+        f"_provbib_software = collect_library_entries({libraries!r}, {citation_types!r})"
     )
 
 
@@ -102,9 +108,11 @@ def generate_software_workflow(
     Detects a notebook's imported libraries and injects their metadata cell.
 
     Reads the notebook, extracts its imports, optionally narrows them to the
-    requested libraries, appends a single cell that builds the citation-metadata
-    DataFrame, and writes the notebook back. The user then runs the injected cell
-    to see the DataFrame as cell output.
+    requested libraries, appends a cell that binds _provbib_software to the
+    citation-metadata DataFrame, then appends (or refreshes) the shared combine
+    cell via bibliography.ensure_combine_cell, and writes the notebook back. The
+    user then runs the injected cells to see the combined DataFrame as cell
+    output.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -133,6 +141,10 @@ def generate_software_workflow(
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
     inject_metadata_cell(nb, wanted, citation_types)
+
+    from bibliography import ensure_combine_cell
+    ensure_combine_cell(nb)
+
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
 

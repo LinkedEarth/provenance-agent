@@ -40,7 +40,7 @@ def test_cite_software_all_injects_and_returns_libraries(tmp_path):
 
     import nbformat
     nb = nbformat.read(str(out), as_version=4)
-    assert "collect_library_entries(" in nb.cells[-1].source
+    assert any("collect_library_entries(" in c.source for c in nb.cells)
 
 
 def test_cite_software_one_library_filters(tmp_path):
@@ -55,7 +55,7 @@ def test_cite_software_passes_citation_type_into_cell(tmp_path):
 
     import nbformat
     nb = nbformat.read(str(out), as_version=4)
-    assert "['pyleoclim'], ['software']" in nb.cells[-1].source
+    assert any("['pyleoclim'], ['software']" in c.source for c in nb.cells)
 
 
 def test_cite_software_unimported_library_returns_empty(tmp_path):
