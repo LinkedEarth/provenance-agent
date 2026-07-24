@@ -186,6 +186,33 @@ def render_bibtex_strings_to_apa(bibtex_strings: list[str]) -> str:
     return "\n\n".join(citations)
 
 
+def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.DataFrame:
+    """
+    Parses raw BibTeX strings into the uniform citation DataFrame.
+
+    The DataFrame twin of render_bibtex_strings_to_apa: where that renders
+    dataset BibTeX to APA text, this renders it to the same 8-column schema
+    collect_library_entries produces, so software and dataset citations share
+    one shape and can be concatenated into the combined bibliography.
+
+    Args:
+        bibtex_strings: raw BibTeX entry strings (e.g. the data workflow's
+            _bib_{var} list from get_bibtex()/get_publications())
+        source: label written to the "library" column (the notebook variable
+            the datasets came from)
+
+    Returns:
+        a DataFrame with columns library, citation_type, key, title, author,
+        year, doi, bibtex; citation_type is "dataset"; rows are deduped by DOI
+    """
+    seen_dois: set[str] = set()
+    rows: list[dict] = []
+    for bibtex_str in bibtex_strings:
+        for entry in bibtexparser.loads(bibtex_str, parser=_bibtex_parser()).entries:
+            _add_entry_row(rows, seen_dois, source, "dataset", entry)
+    return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
+
+
 def generate_bibliography(
     libraries: list[str],
     citation_types: list[str] | None = None,

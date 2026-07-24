@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import bibliography
-from bibliography import collect_library_entries
+from bibliography import collect_library_entries, render_bibtex_strings_to_df
 
 FAKE_INDEX_SHARED_DOI = {
     "liba": {
@@ -110,3 +110,46 @@ def test_generate_bibliography_includes_library_citation(monkeypatch):
 def test_generate_bibliography_reports_unknown_library():
     out = bibliography.generate_bibliography(["definitely_not_a_real_library"])
     assert "No citation found for: definitely_not_a_real_library" in out
+
+
+_BIB_A = """@article{smith2020,
+  author = {Smith, J.},
+  title = {Dataset A},
+  year = {2020},
+  doi = {10.1000/a}
+}"""
+_BIB_B = """@article{jones2021,
+  author = {Jones, K.},
+  title = {Dataset B},
+  year = {2021},
+  doi = {10.1000/b}
+}"""
+
+
+def test_strings_to_df_has_uniform_schema():
+    df = render_bibtex_strings_to_df([_BIB_A], source="D")
+    assert list(df.columns) == [
+        "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+    ]
+    row = df.iloc[0]
+    assert row["library"] == "D"
+    assert row["citation_type"] == "dataset"
+    assert row["key"] == "smith2020"
+
+
+def test_strings_to_df_dedupes_by_doi():
+    df = render_bibtex_strings_to_df([_BIB_A, _BIB_A], source="D")
+    assert len(df) == 1
+
+
+def test_strings_to_df_multiple_entries():
+    df = render_bibtex_strings_to_df([_BIB_A, _BIB_B], source="D")
+    assert len(df) == 2
+
+
+def test_strings_to_df_empty_input_is_empty_framed():
+    df = render_bibtex_strings_to_df([], source="D")
+    assert df.empty
+    assert list(df.columns) == [
+        "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+    ]
