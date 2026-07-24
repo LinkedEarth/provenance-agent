@@ -70,10 +70,11 @@ def test_unsupported_tool_raises():
 
 
 @pytest.mark.parametrize("tool", ["PyLiPD", "PyleoTUPS", "LiPDGraph"])
-def test_every_cell_displays_the_metadata_dataframe(tool):
+def test_every_cell_binds_provbib_data_and_drops_meta_display(tool):
     cell = build_retrieval_cell("D", tool)
-    assert "_meta_D" in cell
-    assert "display(_meta_D)" in cell
+    assert "from bibliography import render_bibtex_strings_to_df" in cell
+    assert '_provbib_data_D = render_bibtex_strings_to_df(_bib_D, "D")' in cell
+    assert "display(_meta_D)" not in cell
 
 
 # --- extract_lipdgraph_endpoint ----------------------------------------------

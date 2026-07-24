@@ -22,15 +22,19 @@ Implementation:
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
       from the endpoint, then calls get_bibtex(). When fmt="apa", the cell pipes
       the collected BibTeX to bibliography.render_bibtex_strings_to_apa() for
-      APA rendering in-kernel. Every cell also display()s the metadata DataFrame
-      that get_bibtex()/get_publications() return alongside the BibTeX.
+      APA rendering in-kernel. Every cell also imports
+      bibliography.render_bibtex_strings_to_df() and binds its result to
+      _provbib_data_{variable}, the per-dataset citation DataFrame that the
+      shared combine cell later concatenates across all injected cells.
     - filter_datasets(pairs, tool, variable): narrows the detected pairs so the
       workflow can cite all datasets, only one tool's datasets, or one variable.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt): appends one retrieval code
       cell per pair to an nbformat notebook node. fmt defaults to "bibtex" and
       accepts "apa" to render citations in APA format.
     - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject,
-      write. fmt defaults to "bibtex" and can be "apa" for APA-formatted output.
+      append the shared combine cell (bibliography.ensure_combine_cell) when at
+      least one dataset was injected, then write. fmt defaults to "bibtex" and
+      can be "apa" for APA-formatted output.
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
@@ -43,9 +47,11 @@ Design decisions:
     - APA rendering happens in the injected cell (via render_bibtex_strings_to_apa)
       so the user can see formatted citations as output without re-running code.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
-      (citations, metadata DataFrame). The cell binds that DataFrame to
-      _meta_{variable} and displays it, so the per-dataset metadata behind each
-      citation is visible instead of being dropped on the floor.
+      (citations, metadata DataFrame). The cell keeps _meta_{variable} bound (for
+      any downstream use) but no longer display()s it directly - instead it binds
+      _provbib_data_{variable} to render_bibtex_strings_to_df's parsed frame, so
+      per-dataset metadata surfaces through the shared combine cell alongside the
+      software citations, matching the software workflow's _provbib_software.
 """
 
 import ast
@@ -114,7 +120,9 @@ def build_retrieval_cell(
 
     Returns:
         Python source that, run in the notebook's kernel, prints the dataset's
-        citations and displays the accompanying metadata DataFrame
+        citations and binds _provbib_data_{variable} to the dataset's citation
+        DataFrame (no longer displays _meta_{variable}; the combine cell shows
+        the combined frame across all injected cells)
 
     Raises:
         ValueError: if tool is not one of the supported dataset sources
@@ -148,7 +156,11 @@ def build_retrieval_cell(
     else:
         out = f'print("\\n".join(_bib_{variable}))\n'
 
-    return body + out + f"display(_meta_{variable})"
+    provbib = (
+        "from bibliography import render_bibtex_strings_to_df\n"
+        f'_provbib_data_{variable} = render_bibtex_strings_to_df(_bib_{variable}, "{variable}")'
+    )
+    return body + out + provbib
 
 
 def filter_datasets(
@@ -215,9 +227,11 @@ def generate_data_workflow(
     Detects datasets in a notebook and injects their citation-retrieval cells.
 
     Reads the notebook, detects its dataset variables via the LLM, optionally
-    filters them, appends a retrieval cell per dataset, and writes the notebook
-    back. The user then runs the injected cells in the live kernel to print the
-    citations.
+    filters them, appends a retrieval cell per dataset, then (when at least one
+    dataset was injected) appends the shared combine cell via
+    bibliography.ensure_combine_cell, and writes the notebook back. The user
+    then runs the injected cells in the live kernel to print the citations and
+    see the combined DataFrame as the last cell's output.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -241,6 +255,9 @@ def generate_data_workflow(
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
     inject_retrieval_cells(nb, pairs, endpoint, fmt)
+    if pairs:
+        from bibliography import ensure_combine_cell
+        ensure_combine_cell(nb)
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
 
