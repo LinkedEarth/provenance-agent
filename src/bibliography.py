@@ -32,6 +32,7 @@ import os
 import sys
 
 import bibtexparser
+import nbformat
 import pandas as pd
 import yaml
 from bibtexparser.bibdatabase import BibDatabase
@@ -211,6 +212,58 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
         for entry in bibtexparser.loads(bibtex_str, parser=_bibtex_parser()).entries:
             _add_entry_row(rows, seen_dois, source, "dataset", entry)
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
+
+
+_COMBINE_MARKER = "# provenance-combine-cell"
+
+
+def build_combine_cell() -> str:
+    """
+    Builds the source for the combined-bibliography cell.
+
+    The cell scans the kernel namespace at run time for every _provbib_*
+    DataFrame (software binds _provbib_software; each data cell binds
+    _provbib_data_{var}) and concatenates them into provenance_bibliography.
+    Scanning at run time is what lets any subset resolve: software-only,
+    data-only, or both all produce the right combined frame without the
+    injector needing to know which segments ran.
+
+    Returns:
+        Python source that builds and display()s provenance_bibliography
+    """
+    columns = "['library', 'citation_type', 'key', 'title', 'author', 'year', 'doi', 'bibtex']"
+    return (
+        f"{_COMBINE_MARKER}\n"
+        "import pandas as pd\n"
+        "_frames = [v for k, v in sorted(globals().items())\n"
+        "           if k.startswith('_provbib_') and isinstance(v, pd.DataFrame)]\n"
+        "provenance_bibliography = (pd.concat(_frames, ignore_index=True)\n"
+        f"                          if _frames else pd.DataFrame(columns={columns}))\n"
+        "display(provenance_bibliography)"
+    )
+
+
+def ensure_combine_cell(nb: nbformat.NotebookNode) -> nbformat.NotebookNode:
+    """
+    Guarantees exactly one combine cell, positioned as the notebook's last cell.
+
+    Removes any existing marked combine cell, then appends a fresh one. Both
+    workflows call this after appending their own cells, so no matter which
+    workflow(s) ran or in what order, the notebook ends with a single combine
+    cell that runs after every segment cell.
+
+    Args:
+        nb: an nbformat notebook node (modified in place)
+
+    Returns:
+        the same notebook node, ending with exactly one combine cell
+    """
+    nb.cells = [
+        c for c in nb.cells
+        if not (c.cell_type == "code" and _COMBINE_MARKER in c.source)
+    ]
+    nb.cells.append(nbformat.v4.new_code_cell(build_combine_cell()))
+    return nb
 
 
 def generate_bibliography(

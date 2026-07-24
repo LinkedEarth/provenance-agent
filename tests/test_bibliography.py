@@ -153,3 +153,47 @@ def test_strings_to_df_empty_input_is_empty_framed():
     assert list(df.columns) == [
         "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
     ]
+
+
+import nbformat
+from bibliography import build_combine_cell, ensure_combine_cell
+
+
+def test_combine_cell_source_scans_and_concats():
+    src = build_combine_cell()
+    assert "# provenance-combine-cell" in src
+    assert "_provbib_" in src
+    assert "provenance_bibliography" in src
+    assert "pd.concat" in src
+    assert "display(provenance_bibliography)" in src
+
+
+def test_ensure_appends_one_combine_cell():
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("import pandas as pd"))
+    ensure_combine_cell(nb)
+    marked = [c for c in nb.cells if "# provenance-combine-cell" in c.source]
+    assert len(marked) == 1
+    assert nb.cells[-1] is marked[0]
+
+
+def test_ensure_is_idempotent_and_keeps_it_last():
+    nb = nbformat.v4.new_notebook()
+    ensure_combine_cell(nb)
+    nb.cells.append(nbformat.v4.new_code_cell("_provbib_data_D = ..."))
+    ensure_combine_cell(nb)
+    marked = [c for c in nb.cells if "# provenance-combine-cell" in c.source]
+    assert len(marked) == 1
+    assert nb.cells[-1] is marked[0]
+
+
+def test_ensure_survives_write_read_roundtrip(tmp_path):
+    nb = nbformat.v4.new_notebook()
+    ensure_combine_cell(nb)
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+    nb2 = nbformat.read(str(path), as_version=4)
+    ensure_combine_cell(nb2)
+    marked = [c for c in nb2.cells if "# provenance-combine-cell" in c.source]
+    assert len(marked) == 1
