@@ -1,7 +1,8 @@
 """
-Unit tests for orchestrator.py. Offline where possible: cite_software's bibtex
-path reads only local Citations/, and the apa path is exercised by monkeypatching
-bibliography.render_apa so no Gemini call is made.
+Unit tests for orchestrator.py. Fully offline: cite_software injects a metadata
+cell (reads imports + writes a notebook, no Gemini), and cite_data is exercised
+with a monkeypatched detector so no network call is made. Both write to a tmp
+output_path so the fixture notebooks are never mutated.
 """
 
 import os
@@ -32,32 +33,34 @@ def test_check_fmt_rejects_unknown():
         _check_fmt("markdown")
 
 
-def test_cite_software_all_bibtex_contains_a_library():
-    out = cite_software(SAMPLE, fmt="bibtex")
-    assert "pyleoclim" in out.lower()
+def test_cite_software_all_injects_and_returns_libraries(tmp_path):
+    out = tmp_path / "out.ipynb"
+    wanted = cite_software(SAMPLE, output_path=str(out))
+    assert "pyleoclim" in wanted
+
+    import nbformat
+    nb = nbformat.read(str(out), as_version=4)
+    assert "collect_library_entries(" in nb.cells[-1].source
 
 
-def test_cite_software_one_library_bibtex():
-    out = cite_software(SAMPLE, libraries="pyleoclim", fmt="bibtex")
-    assert "pyleoclim" in out.lower()
-    assert "numpy" not in out.lower()
+def test_cite_software_one_library_filters(tmp_path):
+    out = tmp_path / "out.ipynb"
+    wanted = cite_software(SAMPLE, libraries="pyleoclim", output_path=str(out))
+    assert wanted == ["pyleoclim"]
 
 
-def test_cite_software_by_citation_type_software_only():
-    out = cite_software(SAMPLE, libraries="pyleoclim", citation_types=["software"], fmt="bibtex")
-    assert "pyleoclim_software" in out
+def test_cite_software_passes_citation_type_into_cell(tmp_path):
+    out = tmp_path / "out.ipynb"
+    cite_software(SAMPLE, libraries="pyleoclim", citation_types=["software"], output_path=str(out))
+
+    import nbformat
+    nb = nbformat.read(str(out), as_version=4)
+    assert "['pyleoclim'], ['software']" in nb.cells[-1].source
 
 
-def test_cite_software_reports_not_imported_library():
-    out = cite_software(SAMPLE, libraries=["definitely_not_here"], fmt="bibtex")
-    assert "definitely_not_here" in out
-
-
-def test_cite_software_apa_routes_to_render(monkeypatch):
-    import bibliography
-    monkeypatch.setattr(bibliography, "render_apa", lambda entries: "APA_SENTINEL")
-    out = cite_software(SAMPLE, libraries="pyleoclim", fmt="apa")
-    assert out.startswith("APA_SENTINEL")
+def test_cite_software_unimported_library_returns_empty(tmp_path):
+    out = tmp_path / "out.ipynb"
+    assert cite_software(SAMPLE, libraries=["definitely_not_here"], output_path=str(out)) == []
 
 
 def test_cite_data_injects_apa_cell(tmp_path, monkeypatch):
@@ -102,11 +105,10 @@ def test_tool_names_and_descriptions():
     assert "dataset" in cite_data_tool.description.lower()
 
 
-def test_cite_software_tool_invokes(monkeypatch):
-    import bibliography
-    monkeypatch.setattr(bibliography, "render_apa", lambda entries: "APA_SENTINEL")
+def test_cite_software_tool_invokes(tmp_path):
     from orchestrator import cite_software_tool
     out = cite_software_tool.invoke(
-        {"notebook_path": SAMPLE, "libraries": "pyleoclim", "fmt": "apa"}
+        {"notebook_path": SAMPLE, "libraries": "pyleoclim",
+         "output_path": str(tmp_path / "out.ipynb")}
     )
-    assert out.startswith("APA_SENTINEL")
+    assert out == ["pyleoclim"]

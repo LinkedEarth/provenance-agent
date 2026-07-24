@@ -22,8 +22,9 @@ Implementation:
       confirmation line the magic prints.
     - cite(request): resolve path -> agent.run() -> formatted text.
     - _format_result(call) / _format_results(calls): render what agent.run()
-      returned. The two tools return different shapes, so formatting dispatches
-      on tool name.
+      returned. Both tools inject cells and return a list of what they injected
+      a cell for (cite_software -> library names, cite_data -> [variable, tool]
+      pairs), so formatting dispatches on tool name and reports what to run.
     - ProvenanceMagics / load_ipython_extension(ipython): registration, so
       %load_ext provenance works.
 
@@ -40,10 +41,11 @@ Design decisions:
       kernel against the Jupyter server's session list, which routinely fails in
       VSCode notebooks - the primary environment for this project. Auto-detect
       stays the default; the override is the recovery path.
-    - cite_data's citations do not exist yet when it returns: it injects
-      retrieval cells whose OUTPUT is the citation. So its summary reports what
-      was injected and tells the user to run the cells, rather than implying
-      citations were produced.
+    - Neither tool's citations exist yet when it returns: both inject cells whose
+      OUTPUT is the citation (cite_data a retrieval cell per dataset, cite_software
+      a single metadata-DataFrame cell). So each summary reports what was injected
+      and tells the user to run the cells, rather than implying citations were
+      produced.
     - Every workflow reads the .ipynb from disk, so unsaved cells are invisible.
       Empty results say so instead of being reported as the answer.
 """
@@ -150,9 +152,21 @@ def _format_result(call: dict) -> str:
             "Reload the notebook and run the new cells to produce the citations."
         )
 
+    if call["name"] == "cite_software":
+        if not result:
+            return f"No software libraries found in {notebook}.\n{_DISK_NOTE}"
+        lines = "\n".join(f"  - {lib}" for lib in result)
+        noun = "library" if len(result) == 1 else "libraries"
+        return (
+            f"Injected a metadata cell into {notebook} for {len(result)} {noun}:\n"
+            f"{lines}\n\n"
+            "Reload the notebook and run the new cell to see the citation "
+            "metadata DataFrame."
+        )
+
     if not str(result).strip():
         return f"No citations found for {notebook}.\n{_DISK_NOTE}"
-    return result
+    return str(result)
 
 
 def _format_results(calls: list[dict]) -> str:

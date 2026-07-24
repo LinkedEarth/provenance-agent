@@ -53,13 +53,17 @@ def test_set_notebook_path_echoes_what_it_stored():
 
 # --- result formatting -------------------------------------------------------
 
-def test_software_result_is_printed_unchanged():
+def test_software_result_summarizes_injected_cell():
     call = {
         "name": "cite_software",
-        "args": {"notebook_path": "nb.ipynb"},
-        "result": "Tierney, J. E. (2015). A title. Journal, 1(2), 3-4.",
+        "args": {"notebook_path": "paleoPCAlite.ipynb"},
+        "result": ["pyleoclim", "pandas"],
     }
-    assert provenance._format_result(call) == call["result"]
+    out = provenance._format_result(call)
+    assert "paleoPCAlite.ipynb" in out
+    assert "pyleoclim" in out
+    assert "pandas" in out
+    assert "run" in out.lower()  # tells the user to run the injected cell
 
 
 def test_data_result_summarizes_injected_cells():
@@ -87,7 +91,7 @@ def test_data_result_with_no_datasets_mentions_reading_from_disk():
 
 
 def test_empty_software_result_mentions_reading_from_disk():
-    call = {"name": "cite_software", "args": {"notebook_path": "nb.ipynb"}, "result": ""}
+    call = {"name": "cite_software", "args": {"notebook_path": "nb.ipynb"}, "result": []}
     assert "unsaved" in provenance._format_result(call).lower()
 
 
@@ -112,24 +116,26 @@ def test_cite_passes_resolved_path_to_the_agent(monkeypatch):
     def fake_run(request, notebook_path):
         seen["request"] = request
         seen["notebook_path"] = notebook_path
-        return [{"name": "cite_software", "args": {}, "result": "a citation"}]
+        return [{"name": "cite_software",
+                 "args": {"notebook_path": notebook_path}, "result": ["pyleoclim"]}]
 
     monkeypatch.setattr(provenance, "_autodetect_path", lambda: None)
     monkeypatch.setattr(provenance, "run", fake_run)
     provenance.set_notebook_path("explicit.ipynb")
 
-    assert provenance.cite("cite the software") == "a citation"
+    assert "pyleoclim" in provenance.cite("cite the software")
     assert seen == {"request": "cite the software", "notebook_path": "explicit.ipynb"}
 
 
 def test_multiple_tool_calls_are_joined():
     calls = [
-        {"name": "cite_software", "args": {"notebook_path": "nb.ipynb"}, "result": "SW"},
+        {"name": "cite_software", "args": {"notebook_path": "nb.ipynb"},
+         "result": ["pyleoclim"]},
         {"name": "cite_data", "args": {"notebook_path": "nb.ipynb"},
          "result": [["D", "PyLiPD"]]},
     ]
     out = provenance._format_results(calls)
-    assert "SW" in out and "D (PyLiPD)" in out
+    assert "pyleoclim" in out and "D (PyLiPD)" in out
 
 
 # --- extension registration --------------------------------------------------

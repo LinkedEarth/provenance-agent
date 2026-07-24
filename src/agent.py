@@ -45,8 +45,8 @@ SYSTEM_PROMPT = (
     "- Use cite_data for datasets from PyLiPD, PyleoTUPS, or LiPDGraph (e.g. "
     "'cite the data', 'cite the datasets').\n"
     "If the user names a specific library or dataset, pass it as the tool's "
-    "filter argument (libraries / targets). Default the output format to APA "
-    "unless the user explicitly asks for BibTeX."
+    "filter argument (libraries / targets). For cite_data, default the output "
+    "format to APA unless the user explicitly asks for BibTeX."
 )
 
 
