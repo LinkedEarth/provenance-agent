@@ -17,7 +17,10 @@ Implementation:
 
 Design Decisions:
     - The injected cell imports collect_library_entries rather than baking BibTeX
-      inline, so the tests assert on that import and the display() call.
+      inline, and binds the result to _provbib_software with no display() call
+      (the combine cell displays the final concatenated frame instead), so the
+      tests assert on that import, the _provbib_software binding, and the
+      absence of display().
     - generate_software_workflow returns the libraries it built a cell for, so a
       filter that matches nothing returns [] and leaves the notebook untouched.
 """

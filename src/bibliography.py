@@ -231,7 +231,7 @@ def build_combine_cell() -> str:
     Returns:
         Python source that builds and display()s provenance_bibliography
     """
-    columns = "['library', 'citation_type', 'key', 'title', 'author', 'year', 'doi', 'bibtex']"
+    columns = str(_DATAFRAME_COLUMNS)
     return (
         f"{_COMBINE_MARKER}\n"
         "import pandas as pd\n"

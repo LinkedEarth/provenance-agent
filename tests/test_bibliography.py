@@ -1,7 +1,10 @@
 """
 Unit tests for bibliography.py's collect_library_entries(). Uses real
 Citations/ data (pyleoclim has both a paper and a software citation) plus
-a monkeypatched citation index for the DOI-dedup case.
+a monkeypatched citation index for the DOI-dedup case. Also covers
+render_bibtex_strings_to_df (the dataset-side twin that produces the same
+8-column schema) and the combine-cell builder/injector (build_combine_cell,
+ensure_combine_cell).
 """
 
 import os
@@ -9,8 +12,15 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import nbformat
+
 import bibliography
-from bibliography import collect_library_entries, render_bibtex_strings_to_df
+from bibliography import (
+    build_combine_cell,
+    collect_library_entries,
+    ensure_combine_cell,
+    render_bibtex_strings_to_df,
+)
 
 FAKE_INDEX_SHARED_DOI = {
     "liba": {
@@ -153,10 +163,6 @@ def test_strings_to_df_empty_input_is_empty_framed():
     assert list(df.columns) == [
         "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
     ]
-
-
-import nbformat
-from bibliography import build_combine_cell, ensure_combine_cell
 
 
 def test_combine_cell_source_scans_and_concats():

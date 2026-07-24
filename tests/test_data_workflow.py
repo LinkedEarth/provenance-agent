@@ -10,9 +10,12 @@ Purpose:
 Implementation:
     build_retrieval_cell and filter_datasets are pure string/list functions.
     inject_retrieval_cells operates on an in-memory nbformat NotebookNode built
-    with nbformat.v4.new_notebook(), so there is no file I/O and no live kernel.
-    The live-kernel execution (the user running the injected cell) is out of
-    scope for these tests.
+    with nbformat.v4.new_notebook(), so most tests do no file I/O and no live
+    kernel. The one exception is test_software_then_data_leaves_one_combine_cell_last,
+    an integration test that writes a notebook to tmp_path and reads it back to
+    confirm the software and data workflows leave a single combine cell last
+    across a real write/read roundtrip. The live-kernel execution (the user
+    running the injected cell) is out of scope for these tests.
 
 Design Decisions:
     - Each tool gets its own cell-generation test so a failure pinpoints which
