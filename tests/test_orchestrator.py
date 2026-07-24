@@ -84,6 +84,26 @@ def test_cite_data_injects_apa_cell(tmp_path, monkeypatch):
     assert "# provenance-combine-cell" in out.cells[-1].source
 
 
+def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: (_ for _ in ()).throw(AssertionError("detector reran")),
+    )
+    notebook = tmp_path / "in.ipynb"
+    _write_lipdgraph_notebook(str(notebook))
+
+    from orchestrator import cite_data
+    pairs = cite_data(
+        str(notebook),
+        detected_pairs=[["filtered_df2", "LiPDGraph"]],
+    )
+
+    assert pairs == [["filtered_df2", "LiPDGraph"]]
+
+
 def test_cite_data_rejects_bad_fmt(tmp_path):
     from orchestrator import cite_data
     with pytest.raises(ValueError):
@@ -95,6 +115,7 @@ def test_tools_are_structured_tools():
     from orchestrator import cite_software_tool, cite_data_tool
     assert isinstance(cite_software_tool, StructuredTool)
     assert isinstance(cite_data_tool, StructuredTool)
+    assert "detected_pairs" not in cite_data_tool.args
 
 
 def test_tool_names_and_descriptions():

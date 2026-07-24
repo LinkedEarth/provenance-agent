@@ -21,18 +21,18 @@ Implementation:
     - set_notebook_path(path): stores the session override, returns the
       confirmation line the magic prints.
     - cite(request): resolve path -> agent.run() -> formatted text.
-    - _format_result(call) / _format_results(calls): render what agent.run()
-      returned. Both tools inject cells and return a list of what they injected
-      a cell for (cite_software -> library names, cite_data -> [variable, tool]
-      pairs), so formatting dispatches on tool name and reports what to run.
+    - _format_result(call) / _format_results(result): render the structured
+      envelope returned by agent.run(). The legacy single-call formatter is
+      retained as a small compatibility helper for direct callers and tests.
     - ProvenanceMagics / load_ipython_extension(ipython): registration, so
       %load_ext provenance works.
 
 Design decisions:
     - No citation or routing logic lives here. agent.run() already resolves a
-      request to a tool call and executes it; this module only resolves the
-      notebook path and renders the result. It imports `agent` and nothing else
-      from the project, so the routing contract stays in one place.
+      request, executes any selected workflows, and statically verifies the
+      notebook; this module only resolves the notebook path and renders the
+      result. It imports `agent` and nothing else from the project, so the
+      routing contract stays in one place.
     - The logic is module-level functions rather than methods on the Magics
       class, so tests exercise it without constructing an IPython shell.
     - UsageError (not RuntimeError) for user mistakes: IPython renders it as a
@@ -169,19 +169,48 @@ def _format_result(call: dict) -> str:
     return str(result)
 
 
-def _format_results(calls: list[dict]) -> str:
+def _format_results(result: dict | list[dict]) -> str:
     """
-    Renders every executed tool call, or explains an unroutable request.
+    Renders an agent result envelope for a notebook cell.
 
     Args:
-        calls: the list agent.run() returned
+        result: the result envelope from agent.run(). A legacy list of tool-call
+            dictionaries is also accepted for callers that use this helper
+            directly.
 
     Returns:
         the full cell output text
     """
-    if not calls:
+    if isinstance(result, list):
+        if not result:
+            return _NO_ROUTE
+        return "\n\n".join(_format_result(call) for call in result)
+
+    if result.get("status") == "warning":
+        warning = result.get("warning") or _NO_ROUTE
+        verification = result.get("verification") or {}
+        if verification.get("mutated"):
+            warning += " The notebook was changed; inspect it before continuing."
+        return f"Warning: {warning}"
+
+    rendered = [
+        _format_result(call)
+        for call in result.get("dispatch", [])
+    ]
+    verification = result.get("verification") or {}
+    if not rendered:
         return _NO_ROUTE
-    return "\n\n".join(_format_result(call) for call in calls)
+
+    status = (
+        "Static verification passed: the injected cells are present and the "
+        "combined bibliography cell is last."
+        if verification.get("combine_cell_present")
+        and verification.get("combine_cell_last")
+        else "Static verification could not confirm the final notebook layout."
+    )
+    if verification.get("runtime_unverified"):
+        status += " Some requested dataset names will be verified when the cells run."
+    return "\n\n".join(rendered + [status])
 
 
 def cite(request: str) -> str:

@@ -20,8 +20,9 @@ Implementation:
       to _provbib_software (no display() call - the combine cell handles that).
       collect_library_entries parses the local Citations/ .bib files with
       bibtexparser, so the DataFrame columns (library, citation_type, key,
-      title, author, year, doi, bibtex) are the parsed metadata of each BibTeX
-      entry.
+      title, author, year, doi, bibtex, note) are the parsed metadata of each
+      BibTeX entry. Imported libraries without a matching citation remain as a
+      note row instead of disappearing.
     - inject_metadata_cell(nb, libraries, citation_types): appends that single
       code cell to an nbformat notebook node.
     - generate_software_workflow(notebook_path, libraries, citation_types,

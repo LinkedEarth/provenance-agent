@@ -43,8 +43,10 @@ from bibtexparser.bwriter import BibTexWriter
 _STDLIB_MODULES = sys.stdlib_module_names
 _CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
 _DATAFRAME_COLUMNS = [
-    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex", "note",
 ]
+
+_NO_CITATION_NOTE = "No citation found for imported library"
 
 
 def load_citation_index() -> dict:
@@ -101,6 +103,7 @@ def _add_entry_row(
         "year": entry.get("year", ""),
         "doi": doi,
         "bibtex": _entry_to_bibtex(entry),
+        "note": "",
     })
 
 
@@ -117,9 +120,9 @@ def collect_library_entries(
             means both
 
     Returns:
-        a DataFrame with one row per citation entry (columns: library,
-        citation_type, key, title, author, year, doi, bibtex); a library
-        with both a paper and a software citation produces two rows
+        a DataFrame with one row per citation entry and the uniform citation
+        columns (including ``note``); a library with both a paper and a
+        software citation produces two rows
     """
     index = load_citation_index()
     seen_dois: set[str] = set()
@@ -127,13 +130,12 @@ def collect_library_entries(
 
     for lib in libraries:
         lib_lower = lib.lower()
-        if lib_lower not in index:
-            continue
-
-        lib_entry = index[lib_lower] or {}
+        found_citation = False
+        lib_entry = index.get(lib_lower) or {}
 
         if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
             entry = bibtexparser.loads(lib_entry["paper"], parser=_bibtex_parser()).entries[0]
+            found_citation = True
             _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
@@ -141,8 +143,22 @@ def collect_library_entries(
             if os.path.exists(bib_path):
                 with open(bib_path) as f:
                     entries = bibtexparser.load(f, parser=_bibtex_parser()).entries
+                found_citation = bool(entries) or found_citation
                 for entry in entries:
                     _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
+
+        if not found_citation:
+            rows.append({
+                "library": lib_lower,
+                "citation_type": None,
+                "key": None,
+                "title": None,
+                "author": None,
+                "year": None,
+                "doi": None,
+                "bibtex": None,
+                "note": _NO_CITATION_NOTE,
+            })
 
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
@@ -161,7 +177,11 @@ def render_apa(entries: pd.DataFrame) -> str:
     """
     from llm import bibtex_to_apa
 
-    citations = [bibtex_to_apa(bibtex) for bibtex in entries["bibtex"]]
+    citations = [
+        bibtex_to_apa(bibtex)
+        for bibtex in entries["bibtex"]
+        if bibtex
+    ]
     return "\n\n".join(citations)
 
 
@@ -192,9 +212,11 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
     Parses raw BibTeX strings into the uniform citation DataFrame.
 
     The DataFrame twin of render_bibtex_strings_to_apa: where that renders
-    dataset BibTeX to APA text, this renders it to the same 8-column schema
+    dataset BibTeX to APA text, this renders it to the same citation schema
     collect_library_entries produces, so software and dataset citations share
-    one shape and can be concatenated into the combined bibliography.
+    one shape and can be concatenated into the combined bibliography. The
+    schema includes a ``note`` column for imported libraries without a local
+    citation.
 
     Args:
         bibtex_strings: raw BibTeX entry strings (e.g. the data workflow's
@@ -203,8 +225,8 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
             the datasets came from)
 
     Returns:
-        a DataFrame with columns library, citation_type, key, title, author,
-        year, doi, bibtex; citation_type is "dataset"; rows are deduped by DOI
+        a DataFrame with the uniform citation columns; citation_type is
+        "dataset" and rows are deduped by DOI
     """
     seen_dois: set[str] = set()
     rows: list[dict] = []

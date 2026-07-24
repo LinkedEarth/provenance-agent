@@ -4,7 +4,7 @@ Unit tests for provenance.py (the %provenance IPython magic).
 The magic is a presentation layer over agent.run(), which needs Gemini, so
 agent.run and the ipynbname auto-detect are monkeypatched here - no test makes
 a network call. What's covered: notebook-path precedence and its error
-message, the two different result shapes the tools return, and the
+message, legacy call formatting, the structured result envelope, and the
 empty-request / unroutable-request paths.
 """
 
@@ -136,6 +136,37 @@ def test_multiple_tool_calls_are_joined():
     ]
     out = provenance._format_results(calls)
     assert "pyleoclim" in out and "D (PyLiPD)" in out
+
+
+def test_envelope_format_reports_warning_without_route():
+    out = provenance._format_results({
+        "status": "warning",
+        "decision": None,
+        "dispatch": [],
+        "verification": {"mutated": False},
+        "warning": "The request was ambiguous.",
+    })
+    assert out.startswith("Warning:")
+    assert "ambiguous" in out
+
+
+def test_envelope_format_reports_static_verification():
+    out = provenance._format_results({
+        "status": "ok",
+        "decision": {"action": "cite"},
+        "dispatch": [{
+            "name": "cite_software",
+            "args": {"notebook_path": "nb.ipynb"},
+            "result": ["pyleoclim"],
+        }],
+        "verification": {
+            "combine_cell_present": True,
+            "combine_cell_last": True,
+            "runtime_unverified": False,
+        },
+    })
+    assert "pyleoclim" in out
+    assert "Static verification passed" in out
 
 
 # --- extension registration --------------------------------------------------
