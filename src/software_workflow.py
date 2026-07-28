@@ -46,14 +46,12 @@ Design decisions:
     - When no libraries match (empty notebook or a filter that hits nothing), no
       cell is injected and the notebook is left untouched, mirroring the data
       workflow's "nothing detected" path.
-    - Standard-library imports with no citation on file (sys, os, json, io, ast,
-      pathlib, ...) are dropped from the import list before the cell is built.
-      They ship with the interpreter, so they are not dependencies anyone cites,
-      and leaving them in produced one "No citation found" row per stdlib module.
-      The rule is bibliography.is_uncitable_stdlib, not a blanket stdlib filter,
-      so a stdlib module someone later adds a citation for is still cited.
-      collect_library_entries applies the same rule, so a direct caller passing
-      a stdlib name in gets the same answer.
+    - Standard-library imports (sys, os, json, io, ast, pathlib, ...) are dropped
+      from the import list before the cell is built. They ship with the
+      interpreter and nobody cites them, and leaving them in produced one
+      "No citation found" row per stdlib module. collect_library_entries drops
+      them too, so a direct caller passing a stdlib name in gets the same
+      answer.
 """
 
 import nbformat
@@ -138,15 +136,12 @@ def generate_software_workflow(
         the library names the metadata cell was built for (empty when nothing
         matched, in which case the notebook is left untouched)
     """
-    from bibliography import is_uncitable_stdlib
+    from bibliography import is_stdlib
     from notebook_parser import parse_notebook, validate_libraries
 
     # Dropped before the cell is built, so the baked-in library list and the
-    # reported result name only libraries that could actually be cited.
-    available = [
-        lib for lib in parse_notebook(notebook_path)
-        if not is_uncitable_stdlib(lib)
-    ]
+    # reported result name only libraries someone would actually cite.
+    available = [lib for lib in parse_notebook(notebook_path) if not is_stdlib(lib)]
     if libraries is None:
         wanted = available
     else:

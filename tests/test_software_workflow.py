@@ -113,7 +113,7 @@ def test_generate_does_not_mutate_the_source_notebook(tmp_path):
     assert len(after.cells) == len(before.cells)
 
 
-def test_generate_excludes_uncited_stdlib_from_cell_and_result(tmp_path):
+def test_generate_excludes_stdlib_from_cell_and_result(tmp_path):
     """A notebook importing sys/json must not cite them as dependencies."""
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell(

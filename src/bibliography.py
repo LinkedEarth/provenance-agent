@@ -60,6 +60,10 @@ def is_stdlib(library: str) -> bool:
     """
     Reports whether a library name is part of the Python standard library.
 
+    Standard-library modules ship with the interpreter and nobody cites them, so
+    they are dropped from an import list outright rather than being reported as
+    libraries whose citation is missing.
+
     Args:
         library: a top-level module name from parse_notebook()
 
@@ -67,45 +71,6 @@ def is_stdlib(library: str) -> bool:
         True if the name is a standard-library module
     """
     return library.lower() in _STDLIB_MODULES
-
-
-def has_citation(library: str) -> bool:
-    """
-    Reports whether Citations/ can supply any entry for a library.
-
-    Checks the same two places collect_library_entries reads - the YAML index
-    and a per-library .bib file - so the two never disagree about whether a
-    library is citeable.
-
-    Args:
-        library: a top-level module name
-
-    Returns:
-        True if the YAML index names it or a matching .bib file exists
-    """
-    lib_lower = library.lower()
-    if lib_lower in load_citation_index():
-        return True
-    return os.path.exists(os.path.join(_CITATIONS_DIR, f"{lib_lower}.bib"))
-
-
-def is_uncitable_stdlib(library: str) -> bool:
-    """
-    Reports whether a library is stdlib AND has no citation on file.
-
-    This is the drop rule for imported libraries. It is deliberately narrower
-    than is_stdlib: a standard-library module that someone later adds a
-    citation for is still worth citing, so only the uncited ones are removed.
-    Third-party libraries are never dropped - an uncited one is a real gap and
-    keeps its note row.
-
-    Args:
-        library: a top-level module name
-
-    Returns:
-        True if the library ships with the interpreter and has no citation
-    """
-    return is_stdlib(library) and not has_citation(library)
 
 
 def _bibtex_parser() -> BibTexParser:
@@ -182,6 +147,8 @@ def collect_library_entries(
 
     for lib in libraries:
         lib_lower = lib.lower()
+        if is_stdlib(lib_lower):
+            continue
         found_citation = False
         lib_entry = index.get(lib_lower) or {}
 
@@ -200,11 +167,6 @@ def collect_library_entries(
                     _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
 
         if not found_citation:
-            # An uncited stdlib import is not a missing citation, it is a
-            # non-dependency. An uncited third-party library still gets a note,
-            # because there the gap is real and worth surfacing.
-            if is_stdlib(lib_lower):
-                continue
             rows.append({
                 "library": lib_lower,
                 "citation_type": None,

@@ -257,22 +257,7 @@ def test_is_stdlib_recognizes_interpreter_modules():
     assert not bibliography.is_stdlib("numpy")
 
 
-def test_has_citation_reads_index_and_bib_files():
-    assert bibliography.has_citation("numpy")      # YAML index only
-    assert bibliography.has_citation("cartopy")    # .bib file
-    assert not bibliography.has_citation("requests")
-    assert not bibliography.has_citation("sys")
-
-
-def test_drop_rule_is_stdlib_without_a_citation():
-    assert bibliography.is_uncitable_stdlib("sys")
-    assert bibliography.is_uncitable_stdlib("json")
-    # third-party without a citation is a real gap, not a non-dependency
-    assert not bibliography.is_uncitable_stdlib("requests")
-    assert not bibliography.is_uncitable_stdlib("numpy")
-
-
-def test_uncited_stdlib_produces_no_rows():
+def test_stdlib_produces_no_rows():
     df = collect_library_entries(["sys", "os", "json", "io", "ast", "pathlib"])
     assert df.empty
     assert list(df.columns) == EXPECTED_COLUMNS
@@ -289,18 +274,3 @@ def test_stdlib_does_not_crowd_out_real_citations():
     assert set(df["library"]) == {"pyleoclim"}
 
 
-def test_a_stdlib_module_with_a_citation_is_still_cited(monkeypatch):
-    """The rule is 'stdlib AND uncited', so adding a citation re-enables it."""
-    monkeypatch.setattr(
-        bibliography, "load_citation_index",
-        lambda: {"json": {"paper": """@article{json_paper,
-  author = {J. Son},
-  title = {A JSON Paper},
-  year = {2020},
-  doi = {10.1000/json}
-}"""}},
-    )
-    assert not bibliography.is_uncitable_stdlib("json")
-    df = collect_library_entries(["json"])
-    assert list(df["library"]) == ["json"]
-    assert df.iloc[0]["citation_type"] == "paper"
