@@ -111,3 +111,22 @@ def test_generate_does_not_mutate_the_source_notebook(tmp_path):
     generate_software_workflow(SAMPLE, output_path=str(tmp_path / "out.ipynb"))
     after = nbformat.read(SAMPLE, as_version=4)
     assert len(after.cells) == len(before.cells)
+
+
+def test_generate_excludes_uncited_stdlib_from_cell_and_result(tmp_path):
+    """A notebook importing sys/json must not cite them as dependencies."""
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "import sys\nimport json\nimport pathlib\nimport numpy as np"
+    ))
+    source = tmp_path / "in.ipynb"
+    with open(source, "w") as f:
+        nbformat.write(nb, f)
+
+    wanted = generate_software_workflow(str(source))
+
+    assert wanted == ["numpy"]
+    written = nbformat.read(str(source), as_version=4)
+    metadata_cell = next(c for c in written.cells if "collect_library_entries(" in c.source)
+    for stdlib_name in ("'sys'", "'json'", "'pathlib'"):
+        assert stdlib_name not in metadata_cell.source
