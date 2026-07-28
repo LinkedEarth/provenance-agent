@@ -230,3 +230,30 @@ def test_run_returns_the_chain_envelope(monkeypatch):
         RunnableLambda(lambda _input: expected),
     )
     assert agent.run("whatever", SAMPLE) == expected
+
+
+def test_rerun_with_unchanged_inputs_still_verifies(tmp_path, monkeypatch):
+    """Re-running rewrites byte-identical cells, so no cell is *added*.
+
+    Verification has to key on the cells being present in the final notebook,
+    not on the added-cell diff, or an idempotent second run reports its own
+    output missing.
+    """
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+    chain = agent.build_chain(_fake_model(decision))
+
+    first = chain.invoke({"request": "cite the software", "notebook_path": str(notebook)})
+    second = chain.invoke({"request": "cite the software", "notebook_path": str(notebook)})
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok", second.get("warning")
+    assert second["verification"]["mutated"] is False   # nothing changed
+    assert "software" in second["verification"]["present"]

@@ -329,10 +329,14 @@ def _verify(state: dict) -> dict:
         expected.append("software")
     if state["resolved"]["data_requested"]:
         expected.append("data")
-    actual = {summary["tool"] for summary in summaries}
-    missing = [tool for tool in expected if tool not in actual]
+    # Presence in the final notebook, not newness. A re-run whose inputs have
+    # not changed rewrites a byte-identical cell, so the added-cell diff is
+    # empty even though the notebook is exactly as it should be.
+    present = {_cell_tool(cell.source) for cell in notebook.cells}
+    missing = [tool for tool in expected if tool not in present]
     verification = {
         "cells": summaries,
+        "present": sorted(tool for tool in present if tool != "unknown"),
         "mutated": bool(added),
         "runtime_unverified": state["resolved"]["runtime_unverified"],
     }

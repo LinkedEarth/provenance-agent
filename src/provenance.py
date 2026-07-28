@@ -146,10 +146,12 @@ def _format_result(call: dict) -> str:
         if not result:
             return f"No datasets detected in {notebook}.\n{_DISK_NOTE}"
         lines = "\n".join(f"  - {variable} ({tool})" for variable, tool in result)
+        noun = "dataset" if len(result) == 1 else "datasets"
         return (
-            f"Injected {len(result)} retrieval cell(s) into {notebook}:\n"
+            f"Injected a dataset cell into {notebook} for {len(result)} {noun}:\n"
             f"{lines}\n\n"
-            "Reload the notebook and run the new cells to produce the citations."
+            "Reload the notebook and run the new cell to print the citations and "
+            "see the provenance_datasets DataFrame."
         )
 
     if call["name"] == "cite_software":
@@ -160,8 +162,8 @@ def _format_result(call: dict) -> str:
         return (
             f"Injected a metadata cell into {notebook} for {len(result)} {noun}:\n"
             f"{lines}\n\n"
-            "Reload the notebook and run the new cell to see the citation "
-            "metadata DataFrame."
+            "Reload the notebook and run the new cell to see the "
+            "provenance_software DataFrame."
         )
 
     if not str(result).strip():
@@ -201,9 +203,12 @@ def _format_results(result: dict | list[dict]) -> str:
     if not rendered:
         return _NO_ROUTE
 
+    # Keyed on the cells being present, not on the notebook having changed: a
+    # re-run with unchanged inputs rewrites identical cells and mutates nothing,
+    # which is a success, not an unconfirmed layout.
     status = (
         "Static verification passed: the injected cells are present."
-        if verification.get("mutated")
+        if verification.get("present")
         else "Static verification could not confirm the final notebook layout."
     )
     if verification.get("runtime_unverified"):

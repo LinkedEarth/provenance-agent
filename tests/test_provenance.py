@@ -161,11 +161,32 @@ def test_envelope_format_reports_static_verification():
         }],
         "verification": {
             "cells": [{"tool": "software", "injected": True}],
+            "present": ["software"],
             "mutated": True,
             "runtime_unverified": False,
         },
     })
     assert "pyleoclim" in out
+    assert "Static verification passed" in out
+
+
+def test_unchanged_rerun_still_reports_verification_passed():
+    """A re-run rewrites identical cells, so nothing is added but all is well."""
+    out = provenance._format_results({
+        "status": "ok",
+        "decision": {"action": "cite"},
+        "dispatch": [{
+            "name": "cite_software",
+            "args": {"notebook_path": "nb.ipynb"},
+            "result": ["pyleoclim"],
+        }],
+        "verification": {
+            "cells": [],
+            "present": ["software"],
+            "mutated": False,
+            "runtime_unverified": False,
+        },
+    })
     assert "Static verification passed" in out
 
 
