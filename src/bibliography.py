@@ -256,6 +256,29 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
 
 _LEGACY_COMBINE_MARKER = "# provenance-combine-cell"
 
+SOFTWARE_FRAME = "provenance_software"
+DATASETS_FRAME = "provenance_datasets"
+
+
+def remove_provenance_cells(nb, frame: str) -> None:
+    """
+    Drops any previously injected cell that binds the given provenance frame.
+
+    Injection appends, so without this a second run would leave the notebook
+    with two software cells (or two dataset cells) that disagree - the stale one
+    still displaying whatever the earlier run found. Each workflow calls this
+    for its own frame before appending, so re-running is idempotent and the
+    notebook holds exactly one cell per workflow.
+
+    Args:
+        nb: an nbformat notebook node (modified in place)
+        frame: the bound frame name, SOFTWARE_FRAME or DATASETS_FRAME
+    """
+    nb.cells = [
+        cell for cell in nb.cells
+        if not (cell.cell_type == "code" and f"{frame} = " in cell.source)
+    ]
+
 
 def remove_legacy_combine_cells(nb) -> None:
     """

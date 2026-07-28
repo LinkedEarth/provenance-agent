@@ -147,10 +147,16 @@ def generate_software_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    inject_metadata_cell(nb, wanted, citation_types)
-
-    from bibliography import remove_legacy_combine_cells
+    from bibliography import (
+        SOFTWARE_FRAME,
+        remove_legacy_combine_cells,
+        remove_provenance_cells,
+    )
+    # Clear the previous run's cells first, then append, so a re-run replaces
+    # its own cell rather than stacking a second, stale one beside it.
+    remove_provenance_cells(nb, SOFTWARE_FRAME)
     remove_legacy_combine_cells(nb)
+    inject_metadata_cell(nb, wanted, citation_types)
 
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)

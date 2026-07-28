@@ -17,10 +17,10 @@ Implementation:
 
 Design Decisions:
     - The injected cell imports collect_library_entries rather than baking BibTeX
-      inline, and binds the result to _provbib_software with no display() call
-      (the combine cell displays the final concatenated frame instead), so the
-      tests assert on that import, the _provbib_software binding, and the
-      absence of display().
+      inline, binds the result to provenance_software and display()s it, so the
+      tests assert on that import, the binding, and the display call. There is
+      no combine cell: each workflow owns exactly one self-displaying cell, and
+      a re-run replaces its own cell rather than appending a second.
     - generate_software_workflow returns the libraries it built a cell for, so a
       filter that matches nothing returns [] and leaves the notebook untouched.
 """
@@ -131,3 +131,19 @@ def test_generate_excludes_stdlib_from_cell_and_result(tmp_path):
     metadata_cell = next(c for c in written.cells if "provenance_software" in c.source)
     for stdlib_name in ("'sys'", "'json'", "'pathlib'"):
         assert stdlib_name not in metadata_cell.source
+
+
+def test_repeated_runs_replace_the_software_cell(tmp_path):
+    """One software cell means one, however many times the workflow runs."""
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    for _ in range(3):
+        generate_software_workflow(str(path))
+
+    written = nbformat.read(str(path), as_version=4)
+    assert sum("provenance_software" in c.source for c in written.cells) == 1
+    assert len(written.cells) == 2  # the original cell plus one injected

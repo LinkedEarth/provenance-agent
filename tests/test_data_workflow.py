@@ -340,3 +340,29 @@ def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
     final = nbformat.read(str(path), as_version=4)
     assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
     assert sum("provenance_datasets" in c.source for c in final.cells) == 1
+
+
+def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
+    """One dataset cell means one, however many times the workflow runs."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda code: [["filtered_df2", "LiPDGraph"]],
+    )
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "filtered_df2 = None"
+    ))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    from data_workflow import generate_data_workflow
+    for _ in range(3):
+        generate_data_workflow(str(path))
+
+    written = nbformat.read(str(path), as_version=4)
+    assert sum("provenance_datasets" in c.source for c in written.cells) == 1
+    assert len(written.cells) == 2

@@ -385,10 +385,16 @@ def generate_data_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names)
-
-    from bibliography import remove_legacy_combine_cells
+    from bibliography import (
+        DATASETS_FRAME,
+        remove_legacy_combine_cells,
+        remove_provenance_cells,
+    )
+    # Clear the previous run's cells first, then append, so a re-run replaces
+    # its own cell rather than stacking a second, stale one beside it.
+    remove_provenance_cells(nb, DATASETS_FRAME)
     remove_legacy_combine_cells(nb)
+    inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names)
 
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
