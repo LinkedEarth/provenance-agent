@@ -79,7 +79,10 @@ def build_metadata_cell(
         cell imports collect_library_entries from bibliography, so src/ must be
         on the kernel's sys.path.
     """
+    from notebook_parser import PROVENANCE_CELL_MARKER
+
     return (
+        f"{PROVENANCE_CELL_MARKER}\n"
         "from bibliography import collect_library_entries\n"
         f"_provbib_software = collect_library_entries({libraries!r}, {citation_types!r})"
     )

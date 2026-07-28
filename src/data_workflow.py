@@ -186,8 +186,10 @@ def build_retrieval_cell(
     else:
         out = f'print("\\n".join(_bib_{variable}))\n'
 
+    from notebook_parser import PROVENANCE_CELL_MARKER
+
     provbib = f"_provbib_data_{variable} = _meta_{variable}"
-    return body + metadata_filter + out + provbib
+    return f"{PROVENANCE_CELL_MARKER}\n" + body + metadata_filter + out + provbib
 
 
 def filter_datasets(
