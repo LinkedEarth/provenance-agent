@@ -202,10 +202,8 @@ def _format_results(result: dict | list[dict]) -> str:
         return _NO_ROUTE
 
     status = (
-        "Static verification passed: the injected cells are present and the "
-        "combined bibliography cell is last."
-        if verification.get("combine_cell_present")
-        and verification.get("combine_cell_last")
+        "Static verification passed: the injected cells are present."
+        if verification.get("mutated")
         else "Static verification could not confirm the final notebook layout."
     )
     if verification.get("runtime_unverified"):

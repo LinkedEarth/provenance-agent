@@ -32,7 +32,6 @@ import os
 import sys
 
 import bibtexparser
-import nbformat
 import pandas as pd
 import yaml
 from bibtexparser.bibdatabase import BibDatabase
@@ -233,7 +232,7 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
     The DataFrame twin of render_bibtex_strings_to_apa: where that renders
     dataset BibTeX to APA text, this renders it to the same citation schema
     collect_library_entries produces, so software and dataset citations share
-    one shape and can be concatenated into the combined bibliography. The
+    one shape and can be concatenated by a caller that wants both. The
     schema includes a ``note`` column for imported libraries without a local
     citation.
 
@@ -255,56 +254,25 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
 
-_COMBINE_MARKER = "# provenance-combine-cell"
+_LEGACY_COMBINE_MARKER = "# provenance-combine-cell"
 
 
-def build_combine_cell() -> str:
+def remove_legacy_combine_cells(nb) -> None:
     """
-    Builds the source for the combined-bibliography cell.
+    Strips the combined-bibliography cell earlier versions used to inject.
 
-    The cell scans the kernel namespace at run time for every _provbib_*
-    DataFrame (software binds _provbib_software; each data cell binds
-    _provbib_data_{var}) and concatenates them into provenance_bibliography.
-    Scanning at run time is what lets any subset resolve: software-only,
-    data-only, or both all produce the right combined frame without the
-    injector needing to know which segments ran.
-
-    Returns:
-        Python source that builds and display()s provenance_bibliography
-    """
-    columns = str(_DATAFRAME_COLUMNS)
-    return (
-        f"{_COMBINE_MARKER}\n"
-        "import pandas as pd\n"
-        "_frames = [v for k, v in sorted(globals().items())\n"
-        "           if k.startswith('_provbib_') and isinstance(v, pd.DataFrame)]\n"
-        "provenance_bibliography = (pd.concat(_frames, ignore_index=True)\n"
-        f"                          if _frames else pd.DataFrame(columns={columns}))\n"
-        "display(provenance_bibliography)"
-    )
-
-
-def ensure_combine_cell(nb: nbformat.NotebookNode) -> nbformat.NotebookNode:
-    """
-    Guarantees exactly one combine cell, positioned as the notebook's last cell.
-
-    Removes any existing marked combine cell, then appends a fresh one. Both
-    workflows call this after appending their own cells, so no matter which
-    workflow(s) ran or in what order, the notebook ends with a single combine
-    cell that runs after every segment cell.
+    The two workflows now each own one self-displaying cell, so nothing creates
+    this cell anymore. Notebooks run against an older version still carry one,
+    and since no code manages it now it would linger forever and re-display a
+    stale bibliography. Both workflows call this before writing.
 
     Args:
         nb: an nbformat notebook node (modified in place)
-
-    Returns:
-        the same notebook node, ending with exactly one combine cell
     """
     nb.cells = [
-        c for c in nb.cells
-        if not (c.cell_type == "code" and _COMBINE_MARKER in c.source)
+        cell for cell in nb.cells
+        if not (cell.cell_type == "code" and _LEGACY_COMBINE_MARKER in cell.source)
     ]
-    nb.cells.append(nbformat.v4.new_code_cell(build_combine_cell()))
-    return nb
 
 
 def generate_bibliography(

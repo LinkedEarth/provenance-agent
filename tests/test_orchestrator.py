@@ -81,7 +81,7 @@ def test_cite_data_injects_apa_cell(tmp_path, monkeypatch):
     out = nbformat.read(str(nb_out), as_version=4)
     assert any("render_bibtex_strings_to_apa(_bib_filtered_df2)" in c.source for c in out.cells)
     assert any("repositories/LiPDVerse-dynamic" in c.source for c in out.cells)
-    assert "# provenance-combine-cell" in out.cells[-1].source
+    assert "display(provenance_datasets)" in out.cells[-1].source
 
 
 def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):

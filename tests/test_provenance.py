@@ -160,8 +160,8 @@ def test_envelope_format_reports_static_verification():
             "result": ["pyleoclim"],
         }],
         "verification": {
-            "combine_cell_present": True,
-            "combine_cell_last": True,
+            "cells": [{"tool": "software", "injected": True}],
+            "mutated": True,
             "runtime_unverified": False,
         },
     })

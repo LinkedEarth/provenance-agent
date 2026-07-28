@@ -87,8 +87,8 @@ def test_chain_parses_typed_software_target_and_verifies_injection(tmp_path):
         {"kind": "software", "name": "pyleoclim"}
     ]
     assert result["dispatch"][0]["name"] == "cite_software"
-    assert result["verification"]["combine_cell_present"] is True
-    assert result["verification"]["combine_cell_last"] is True
+    assert result["verification"]["mutated"] is True
+    assert [c["tool"] for c in result["verification"]["cells"]] == ["software"]
 
 
 def test_ambiguous_classification_returns_warning_without_mutation(tmp_path):
@@ -173,19 +173,17 @@ def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatc
         with open(path) as handle:
             current = nbformat.read(handle, as_version=4)
         current.cells.append(nbformat.v4.new_code_cell(source))
-        from bibliography import ensure_combine_cell
-        ensure_combine_cell(current)
         with open(path, "w") as handle:
             nbformat.write(current, handle)
 
     def fake_software(path, libraries=None):
         dispatch_calls.append(("software", libraries))
-        append_segment(path, "_provbib_software = software_frame")
+        append_segment(path, "provenance_software = software_frame")
         return ["pyleoclim"]
 
     def fake_data(path, targets=None, fmt="apa", detected_pairs=None):
         dispatch_calls.append(("data", targets, fmt, detected_pairs))
-        append_segment(path, "_provbib_data_filtered_df2 = data_frame")
+        append_segment(path, "provenance_datasets = data_frame")
         return detected_pairs
 
     monkeypatch.setattr(agent, "_detect_dataset_pairs", fake_detect)
@@ -213,9 +211,9 @@ def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatc
         "cite_software", "cite_data"
     ]
     assert result["status"] == "ok"
-    assert result["verification"]["combine_cell_last"] is True
+    assert result["verification"]["mutated"] is True
     assert {cell["tool"] for cell in result["verification"]["cells"]} == {
-        "software", "data", "combine"
+        "software", "data"
     }
 
 

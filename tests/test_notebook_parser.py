@@ -225,13 +225,14 @@ def test_read_notebook_code_ignores_injected_cells(tmp_path):
 
 def test_injected_cells_carry_the_marker():
     """New cells are recognized by the marker, not by inferring their contents."""
-    import sys as _sys
     from notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
     from software_workflow import build_metadata_cell
-    from data_workflow import build_retrieval_cell
+    from data_workflow import build_dataset_cell
 
     software = build_metadata_cell(["numpy"])
-    data = build_retrieval_cell("D", "PyLiPD")
+    # The marker belongs on the injected cell, not on build_retrieval_cell's
+    # fragment, which never becomes a cell of its own.
+    data = build_dataset_cell([["D", "PyLiPD"]])
     assert software.startswith(PROVENANCE_CELL_MARKER)
     assert data.startswith(PROVENANCE_CELL_MARKER)
     assert is_generated_cell(software) and is_generated_cell(data)

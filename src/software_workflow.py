@@ -3,33 +3,27 @@ Software workflow orchestrator: turns a notebook's imported libraries into a
 citation-metadata cell injected into the notebook.
 
 Purpose:
-    The mirror image of data_workflow.py on the software side. Where the data
-    workflow injects one retrieval cell per dataset (each calling a library
-    method on a live kernel object), the software workflow injects a single cell
-    that, when run, builds a pandas DataFrame of the software citations' metadata
-    and binds it to _provbib_software. Both workflows now share the same shape:
-    analyze the notebook, append cell(s) with nbformat, append the shared combine
-    cell (bibliography.ensure_combine_cell) that displays every _provbib_*
-    variable as one combined frame, write the notebook back, and let the user run
-    the injected cells to see the result as cell output.
+    The mirror image of data_workflow.py on the software side. Each workflow
+    owns exactly one cell: this one builds a pandas DataFrame of the software
+    citations' metadata, binds it to provenance_software, and displays it. Both
+    workflows share the same shape - analyze the notebook, append one cell with
+    nbformat, write the notebook back, and let the user run the cell to see its
+    DataFrame as the cell's output.
 
 Implementation:
     - build_metadata_cell(libraries, citation_types): returns the Python source
       for the injected cell. The cell imports collect_library_entries from
-      bibliography and calls it on the baked-in library list, binding the result
-      to _provbib_software (no display() call - the combine cell handles that).
-      collect_library_entries parses the local Citations/ .bib files with
-      bibtexparser, so the DataFrame columns (library, citation_type, key,
-      title, author, year, doi, bibtex, note) are the parsed metadata of each
-      BibTeX entry. Imported libraries without a matching citation remain as a
-      note row instead of disappearing.
+      bibliography, calls it on the baked-in library list, binds the result to
+      provenance_software, and display()s it. collect_library_entries parses the
+      local Citations/ .bib files with bibtexparser, so the DataFrame columns
+      (library, citation_type, key, title, author, year, doi, bibtex, note) are
+      the parsed metadata of each BibTeX entry. Imported libraries without a
+      matching citation remain as a note row instead of disappearing.
     - inject_metadata_cell(nb, libraries, citation_types): appends that single
       code cell to an nbformat notebook node.
     - generate_software_workflow(notebook_path, libraries, citation_types,
       output_path): top-level glue - parse the imports, optionally filter to the
-      requested libraries, inject the metadata cell, append/refresh the shared
-      combine cell via bibliography.ensure_combine_cell, and write the notebook
-      back.
+      requested libraries, inject the metadata cell, and write the notebook back.
 
 Design decisions:
     - The cell imports from bibliography rather than baking the collected BibTeX
@@ -37,12 +31,14 @@ Design decisions:
       this means src/ must be on the kernel's sys.path for the import to succeed
       (the demo notebooks add it, and the data workflow's APA cell has the same
       requirement).
-    - One cell for all libraries (not one per library like the data workflow),
-      because all software citations resolve to a single DataFrame - there is no
-      per-library live object to reuse.
-    - Citations are surfaced as the combine cell's OUTPUT, not as this module's
+    - One cell for all libraries, because all software citations resolve to a
+      single DataFrame - there is no per-library live object to reuse.
+    - Citations are surfaced as the injected cell's OUTPUT, not as this module's
       return value, so the contract matches cite_data: the return value is the
       list of libraries the metadata cell was built for.
+    - There is no combined software-plus-data frame. The two workflows produce
+      two independent, self-displaying cells (provenance_software and
+      provenance_datasets), so each can be read, re-run, or deleted on its own.
     - When no libraries match (empty notebook or a filter that hits nothing), no
       cell is injected and the notebook is left untouched, mirroring the data
       workflow's "nothing detected" path.
@@ -71,9 +67,8 @@ def build_metadata_cell(
 
     Returns:
         Python source that, run in the notebook's kernel, binds
-        _provbib_software to a pandas DataFrame of the libraries' citation
-        metadata. It does not display() the frame - the combine cell appended
-        by generate_software_workflow displays the combined frame instead. The
+        provenance_software to a pandas DataFrame of the libraries' citation
+        metadata and displays it, so the citations are the cell's output. The
         cell imports collect_library_entries from bibliography, so src/ must be
         on the kernel's sys.path.
     """
@@ -82,7 +77,8 @@ def build_metadata_cell(
     return (
         f"{PROVENANCE_CELL_MARKER}\n"
         "from bibliography import collect_library_entries\n"
-        f"_provbib_software = collect_library_entries({libraries!r}, {citation_types!r})"
+        f"provenance_software = collect_library_entries({libraries!r}, {citation_types!r})\n"
+        "display(provenance_software)"
     )
 
 
@@ -119,10 +115,8 @@ def generate_software_workflow(
 
     Reads the notebook, extracts its imports, optionally narrows them to the
     requested libraries, appends a cell that binds _provbib_software to the
-    citation-metadata DataFrame, then appends (or refreshes) the shared combine
-    cell via bibliography.ensure_combine_cell, and writes the notebook back. The
-    user then runs the injected cells to see the combined DataFrame as cell
-    output.
+    citation-metadata DataFrame and displays it, then writes the notebook back.
+    The user runs that cell to see the DataFrame as its output.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -155,8 +149,8 @@ def generate_software_workflow(
         nb = nbformat.read(f, as_version=4)
     inject_metadata_cell(nb, wanted, citation_types)
 
-    from bibliography import ensure_combine_cell
-    ensure_combine_cell(nb)
+    from bibliography import remove_legacy_combine_cells
+    remove_legacy_combine_cells(nb)
 
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)

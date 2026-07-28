@@ -3,43 +3,45 @@ Data workflow orchestrator: turns detected dataset variables into dataset
 citations by injecting retrieval cells into the notebook's live kernel.
 
 Purpose:
-    Given the [variable, tool] pairs from dataset_detection, generate a code
-    cell per dataset that retrieves its BibTeX, and append those cells to the
-    notebook with nbformat. The cells are meant to run in the notebook's own
-    kernel, where the already-loaded objects (LiPD objects, PyleoTUPS datasets,
-    the LiPDGraph result DataFrame) are reused - no re-querying or re-loading.
-    The fmt parameter controls whether cells output raw BibTeX or render it to
-    APA format.
+    Given the [variable, tool] pairs from dataset_detection, generate one code
+    cell that retrieves every dataset's BibTeX, and append it to the notebook
+    with nbformat. The cell is meant to run in the notebook's own kernel, where
+    the already-loaded objects (LiPD objects, PyleoTUPS datasets, the LiPDGraph
+    result DataFrame) are reused - no re-querying or re-loading. Its output is
+    the citations plus a provenance_datasets DataFrame. The fmt parameter
+    controls whether it prints raw BibTeX or renders APA.
 
 Implementation:
     - extract_lipdgraph_endpoint(code): AST-scans the notebook for the
       LinkedEarth graph endpoint URL (the string passed to requests.post), so
       the LiPDGraph pathway loads from the same repository the notebook queried.
-    - build_retrieval_cell(variable, tool, endpoint, fmt, dataset_names): returns the Python
-      source for one dataset's retrieval cell. PyLiPD/PyleoTUPS call the library
-      method directly on the in-memory object (Approach C: {var}.{method}).
+    - build_retrieval_cell(variable, tool, endpoint, dataset_names): returns the
+      retrieval block for one dataset - a fragment, not a standalone cell.
+      PyLiPD/PyleoTUPS call the library method directly on the in-memory object
+      (Approach C: {var}.{method}).
       Optional dataSetName filters are applied case-insensitively and exactly to
       the returned metadata DataFrame, after retrieval.
       LiPDGraph is special: the terminal variable is a DataFrame, so the cell
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
       from the endpoint, then calls get_bibtex(). When fmt="apa", the cell pipes
       the collected BibTeX to bibliography.render_bibtex_strings_to_apa() for
-      APA rendering in-kernel. Every cell also imports
-      the tool-provided metadata DataFrame to _provbib_data_{variable}, the
-      per-dataset metadata frame that the shared combine cell later
-      concatenates across all injected cells.
+      APA rendering in-kernel.
+    - build_dataset_cell(pairs, endpoint, fmt, dataset_names): composes one
+      retrieval block per dataset into the single injected cell, prints the
+      citations once, and concatenates every _meta_{variable} into one
+      provenance_datasets DataFrame that the cell displays.
     - filter_datasets(pairs, tool, variable): retains the legacy variable-level
       filter behavior.
     - split_targets(pairs, targets): separates detected variable names from
       unmatched dataSetName filters; unmatched names keep all detected pairs so
       each retrieval cell can filter its returned metadata.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names): appends
-      one retrieval code cell per pair to an nbformat notebook node. fmt
-      defaults to "bibtex" and accepts "apa" to render citations in APA format.
-    - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject,
-      append the shared combine cell (bibliography.ensure_combine_cell) when at
-      least one dataset was injected, then write. fmt defaults to "bibtex" and
-      can be "apa" for APA-formatted output.
+      the single dataset cell covering every pair to an nbformat notebook node,
+      or nothing when pairs is empty. fmt defaults to "bibtex" and accepts "apa"
+      to render citations in APA format.
+    - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject
+      the single dataset cell, then write. fmt defaults to "bibtex" and can be
+      "apa" for APA-formatted output.
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
@@ -49,17 +51,21 @@ Design decisions:
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Dataset-name filters are applied after get_bibtex()/get_publications() to
       the source-provided metadata DataFrame. This keeps the source retrieval
-      path unchanged and lets the combined bibliography preserve every field
-      returned by the data library.
+      path unchanged and lets provenance_datasets preserve every field returned
+      by the data library.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
     - APA rendering happens in the injected cell (via render_bibtex_strings_to_apa)
       so the user can see formatted citations as output without re-running code.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
-      (citations, metadata DataFrame). The cell keeps _meta_{variable} bound
-      and aliases it as _provbib_data_{variable}; the shared combine cell
-      preserves all metadata columns and fills software-only fields with nulls
-      when the software and data frames are concatenated.
+      (citations, metadata DataFrame). Each retrieval block keeps its
+      _meta_{variable} bound, and the cell pd.concat()s them into
+      provenance_datasets, so sources with different metadata columns produce
+      the union with nulls filled in.
+    - One cell for every dataset, not one per dataset, so the notebook gains
+      exactly two provenance cells at most: provenance_software and
+      provenance_datasets. The tradeoff is that a retrieval failure for one
+      dataset stops the whole cell.
 """
 
 import ast
@@ -109,11 +115,14 @@ def build_retrieval_cell(
     variable: str,
     tool: str,
     endpoint: str | None = None,
-    fmt: str = "bibtex",
     dataset_names: list[str] | None = None,
 ) -> str:
     """
-    Builds the Python source for a single dataset's citation-retrieval cell.
+    Builds one dataset's retrieval block for the shared dataset cell.
+
+    This is a fragment, not a standalone cell: it leaves _bib_{variable} and
+    _meta_{variable} bound in the kernel and prints nothing. build_dataset_cell
+    concatenates one block per dataset and appends the shared print/display.
 
     Args:
         variable: the notebook variable holding the dataset (from detection)
@@ -122,19 +131,12 @@ def build_retrieval_cell(
         endpoint: LiPDGraph only - the graph endpoint the notebook queried
             (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
             when None.
-        fmt: "bibtex" (default) prints the raw BibTeX; "apa" renders it to APA
-            in-kernel via bibliography.render_bibtex_strings_to_apa. When
-            fmt="apa", the injected cell imports from bibliography, so src/ must
-            be on the kernel's sys.path for the import to succeed.
         dataset_names: optional dataSetName values to match case-insensitively
             and exactly in the returned metadata DataFrame. If the source does
             not expose a ``dsname`` column, the metadata is left unchanged.
 
     Returns:
-        Python source that, run in the notebook's kernel, prints the dataset's
-        citations and binds _provbib_data_{variable} to the tool-provided
-        metadata DataFrame (the combine cell shows the union of all metadata
-        and software columns; it does not display _meta_{variable} directly)
+        Python source binding _bib_{variable} and _meta_{variable}
 
     Raises:
         ValueError: if tool is not one of the supported dataset sources
@@ -178,18 +180,61 @@ def build_retrieval_cell(
             "    ]\n"
         )
 
+    return body + metadata_filter
+
+
+def build_dataset_cell(
+    pairs: list[list[str]],
+    endpoint: str | None = None,
+    fmt: str = "bibtex",
+    dataset_names: list[str] | None = None,
+) -> str:
+    """
+    Builds the source for the single dataset-citation cell.
+
+    Composes one retrieval block per detected dataset, prints the collected
+    citations, and concatenates every per-dataset metadata frame into one
+    ``provenance_datasets`` DataFrame that the cell displays.
+
+    Args:
+        pairs: the [variable, tool] pairs to retrieve citations for
+        endpoint: LiPDGraph endpoint baked into any LiPDGraph block
+        fmt: "bibtex" (default) prints raw BibTeX; "apa" renders APA in-kernel
+        dataset_names: optional exact, case-insensitive dataSetName filters
+
+    Returns:
+        Python source that, run in the notebook's kernel, prints the datasets'
+        citations and displays provenance_datasets
+
+    Raises:
+        ValueError: if any pair names an unsupported dataset source
+    """
+    variables = [pair[0] for pair in pairs]
+    blocks = "".join(
+        build_retrieval_cell(variable, tool, endpoint, dataset_names)
+        for variable, tool in pairs
+    )
+
+    collected = " + ".join(f"_bib_{variable}" for variable in variables)
     if fmt == "apa":
         out = (
             "from bibliography import render_bibtex_strings_to_apa\n"
-            f"print(render_bibtex_strings_to_apa(_bib_{variable}))\n"
+            f"print(render_bibtex_strings_to_apa({collected}))\n"
         )
     else:
-        out = f'print("\\n".join(_bib_{variable}))\n'
+        out = f'print("\\n".join({collected}))\n'
 
+    # The marker goes on the cell, not on each retrieval block, since the block
+    # is a fragment that never becomes a cell of its own.
     from notebook_parser import PROVENANCE_CELL_MARKER
 
-    provbib = f"_provbib_data_{variable} = _meta_{variable}"
-    return f"{PROVENANCE_CELL_MARKER}\n" + body + metadata_filter + out + provbib
+    frames = ", ".join(f"_meta_{variable}" for variable in variables)
+    display = (
+        "import pandas as pd\n"
+        f"provenance_datasets = pd.concat([{frames}], ignore_index=True)\n"
+        "display(provenance_datasets)"
+    )
+    return f"{PROVENANCE_CELL_MARKER}\n" + blocks + out + display
 
 
 def filter_datasets(
@@ -263,27 +308,30 @@ def inject_retrieval_cells(
     dataset_names: list[str] | None = None,
 ) -> nbformat.NotebookNode:
     """
-    Appends one retrieval code cell per dataset pair to a notebook node.
+    Appends the single dataset-citation cell covering every detected dataset.
+
+    One cell, not one per dataset, so the notebook gains exactly one cell whose
+    output is the datasets' citations and the provenance_datasets DataFrame.
 
     Args:
         nb: an nbformat notebook node (modified in place)
-        pairs: [variable, tool] pairs to generate cells for
-        endpoint: LiPDGraph endpoint to bake into LiPDGraph cells (see
-            build_retrieval_cell); falls back to _LIPDVERSE_ENDPOINT when None
-        fmt: "bibtex" (default) or "apa" - format for citations in the
-            injected cell (see build_retrieval_cell)
+        pairs: [variable, tool] pairs to generate the cell for; an empty list
+            appends nothing
+        endpoint: LiPDGraph endpoint to bake into any LiPDGraph block; falls
+            back to _LIPDVERSE_ENDPOINT when None
+        fmt: "bibtex" (default) or "apa" - citation format for the cell
         dataset_names: optional exact, case-insensitive dataSetName filters
-            passed to each generated retrieval cell
 
     Returns:
-        the same notebook node, with the retrieval cells appended
+        the same notebook node, with the dataset cell appended
     """
-    for variable, tool in pairs:
-        nb.cells.append(
-            nbformat.v4.new_code_cell(
-                build_retrieval_cell(variable, tool, endpoint, fmt, dataset_names)
-            )
+    if not pairs:
+        return nb
+    nb.cells.append(
+        nbformat.v4.new_code_cell(
+            build_dataset_cell(pairs, endpoint, fmt, dataset_names)
         )
+    )
     return nb
 
 
@@ -300,11 +348,9 @@ def generate_data_workflow(
     Detects datasets in a notebook and injects their citation-retrieval cells.
 
     Reads the notebook, detects its dataset variables via the LLM, optionally
-    filters them, appends a retrieval cell per dataset, then (when at least one
-    dataset was injected) appends the shared combine cell via
-    bibliography.ensure_combine_cell, and writes the notebook back. The user
-    then runs the injected cells in the live kernel to print the citations and
-    see the combined DataFrame as the last cell's output.
+    filters them, appends the single dataset-citation cell, and writes the
+    notebook back. The user then runs that cell in the live kernel to print the
+    citations and see the provenance_datasets DataFrame as its output.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -340,9 +386,10 @@ def generate_data_workflow(
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
     inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names)
-    if pairs:
-        from bibliography import ensure_combine_cell
-        ensure_combine_cell(nb)
+
+    from bibliography import remove_legacy_combine_cells
+    remove_legacy_combine_cells(nb)
+
     with open(output_path or notebook_path, "w") as f:
         nbformat.write(nb, f)
 

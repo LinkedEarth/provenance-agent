@@ -290,12 +290,10 @@ def _new_cells(before: Counter, notebook) -> list:
 
 
 def _cell_tool(source: str) -> str:
-    """Classifies an injected cell by its stable source conventions."""
-    if "# provenance-combine-cell" in source:
-        return "combine"
-    if "_provbib_software" in source:
+    """Classifies an injected cell by the frame it binds."""
+    if "provenance_software" in source:
         return "software"
-    if "_provbib_data_" in source:
+    if "provenance_datasets" in source:
         return "data"
     return "unknown"
 
@@ -306,19 +304,10 @@ def _verify(state: dict) -> dict:
     with open(notebook_path) as handle:
         notebook = nbformat.read(handle, as_version=4)
 
-    combine_indexes = [
-        index for index, cell in enumerate(notebook.cells)
-        if "# provenance-combine-cell" in cell.source
-    ]
-    combine_present = bool(combine_indexes)
-    combine_last = combine_present and combine_indexes[-1] == len(notebook.cells) - 1
-
     if state.get("status") == "warning":
         mutated = _snapshot_cells(notebook_path) != state["before_snapshot"]
         verification = {
             "cells": [],
-            "combine_cell_present": combine_present,
-            "combine_cell_last": combine_last,
             "mutated": mutated,
             "runtime_unverified": False,
         }
@@ -344,23 +333,17 @@ def _verify(state: dict) -> dict:
     missing = [tool for tool in expected if tool not in actual]
     verification = {
         "cells": summaries,
-        "combine_cell_present": combine_present,
-        "combine_cell_last": combine_last,
         "mutated": bool(added),
         "runtime_unverified": state["resolved"]["runtime_unverified"],
     }
-    if missing or not combine_present or not combine_last:
-        message = []
-        if missing:
-            message.append("missing injected " + ", ".join(missing) + " cell")
-        if not combine_present:
-            message.append("combine cell is absent")
-        elif not combine_last:
-            message.append("combine cell is not last")
+    if missing:
         state = {
             **state,
             "status": "warning",
-            "warning": "Verification failed: " + "; ".join(message),
+            "warning": (
+                "Verification failed: missing injected "
+                + ", ".join(missing) + " cell"
+            ),
         }
     return _public_result(state, verification)
 
@@ -415,8 +398,6 @@ def _parser_warning_envelope(message: str) -> dict:
         "dispatch": [],
         "verification": {
             "cells": [],
-            "combine_cell_present": False,
-            "combine_cell_last": False,
             "mutated": False,
             "runtime_unverified": False,
         },

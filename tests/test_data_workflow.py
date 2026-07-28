@@ -11,10 +11,10 @@ Implementation:
     build_retrieval_cell and filter_datasets are pure string/list functions.
     inject_retrieval_cells operates on an in-memory nbformat NotebookNode built
     with nbformat.v4.new_notebook(), so most tests do no file I/O and no live
-    kernel. The one exception is test_software_then_data_leaves_one_combine_cell_last,
+    kernel. The one exception is test_software_then_data_leaves_one_cell_each,
     an integration test that writes a notebook to tmp_path and reads it back to
-    confirm the software and data workflows leave a single combine cell last
-    across a real write/read roundtrip. The live-kernel execution (the user
+    confirm the two workflows leave exactly one self-displaying cell each across
+    a real write/read roundtrip. The live-kernel execution (the user
     running the injected cell) is out of scope for these tests.
 
 Design Decisions:
@@ -24,7 +24,7 @@ Design Decisions:
       so its cell references the DataFrame's dataSetName column and the LiPDVerse
       endpoint - asserted explicitly.
     - Dataset provenance frames reuse the metadata DataFrame returned by the
-      source library, preserving its full schema for the combined output.
+      source library, preserving its full schema in provenance_datasets.
       Dataset-name targets filter that metadata after retrieval.
     - Unsupported tools raise ValueError rather than silently emitting nothing.
 """
@@ -41,6 +41,7 @@ from data_workflow import (
     build_retrieval_cell,
     extract_lipdgraph_endpoint,
     filter_datasets,
+    build_dataset_cell,
     inject_retrieval_cells,
     split_targets,
 )
@@ -102,11 +103,12 @@ def test_unsupported_tool_raises():
 
 
 @pytest.mark.parametrize("tool", ["PyLiPD", "PyleoTUPS", "LiPDGraph"])
-def test_every_cell_binds_provbib_data_and_drops_meta_display(tool):
-    cell = build_retrieval_cell("D", tool)
-    assert "_provbib_data_D = _meta_D" in cell
-    assert "render_bibtex_strings_to_df" not in cell
-    assert "display(_meta_D)" not in cell
+def test_every_block_binds_bib_and_meta_without_printing(tool):
+    """Retrieval blocks are fragments; the shared cell owns print and display."""
+    block = build_retrieval_cell("D", tool)
+    assert "_meta_D" in block and "_bib_D" in block
+    assert "print(" not in block
+    assert "display(" not in block
 
 
 # --- extract_lipdgraph_endpoint ----------------------------------------------
@@ -230,40 +232,56 @@ def test_generate_data_workflow_rejects_both_target_aliases(tmp_path):
 
 # --- inject_retrieval_cells --------------------------------------------------
 
-def test_inject_appends_one_code_cell_per_pair():
+def test_inject_appends_exactly_one_cell_for_all_datasets():
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell("df_res = pd.read_csv(data)"))
     inject_retrieval_cells(nb, [["D", "PyLiPD"], ["ds", "PyleoTUPS"]])
     code_cells = [c for c in nb.cells if c.cell_type == "code"]
-    assert len(code_cells) == 3  # original + 2 injected
-    assert "D.get_bibtex(remote=True)" in code_cells[1].source
-    assert "ds.get_publications()" in code_cells[2].source
+    assert len(code_cells) == 2  # original + 1 injected
+    injected = code_cells[1].source
+    assert "D.get_bibtex(remote=True)" in injected
+    assert "ds.get_publications()" in injected
+    assert injected.count("display(provenance_datasets)") == 1
+    assert "pd.concat([_meta_D, _meta_ds], ignore_index=True)" in injected
+
+
+def test_inject_with_no_pairs_appends_nothing():
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("x = 1"))
+    inject_retrieval_cells(nb, [])
+    assert len(nb.cells) == 1
 
 
 # --- fmt parameter for APA rendering -----------------------------------------
 
 def test_pylipd_cell_apa_renders_via_bibliography():
-    cell = build_retrieval_cell("D", "PyLiPD", fmt="apa")
+    cell = build_dataset_cell([["D", "PyLiPD"]], fmt="apa")
     assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
     assert "from bibliography import render_bibtex_strings_to_apa" in cell
     assert "print(render_bibtex_strings_to_apa(_bib_D))" in cell
 
 
 def test_pyleotups_cell_apa_wraps_publications():
-    cell = build_retrieval_cell("ds", "PyleoTUPS", fmt="apa")
+    cell = build_dataset_cell([["ds", "PyleoTUPS"]], fmt="apa")
     assert "ds.get_publications()" in cell
     assert "render_bibtex_strings_to_apa(_bib_ds)" in cell
 
 
 def test_bibtex_fmt_is_unchanged_default():
-    cell = build_retrieval_cell("D", "PyLiPD")
+    cell = build_dataset_cell([["D", "PyLiPD"]])
     assert 'print("\\n".join(_bib_D))' in cell
     assert "render_bibtex_strings_to_apa" not in cell
 
 
+def test_multi_dataset_cell_prints_every_bibliography_once():
+    cell = build_dataset_cell([["D", "PyLiPD"], ["ds", "PyleoTUPS"]])
+    assert 'print("\\n".join(_bib_D + _bib_ds))' in cell
+    assert cell.count("print(") == 1
+
+
 # --- cross-workflow integration -----------------------------------------------
 
-def test_software_then_data_leaves_one_combine_cell_last(tmp_path, monkeypatch):
+def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
     import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
@@ -287,8 +305,38 @@ def test_software_then_data_leaves_one_combine_cell_last(tmp_path, monkeypatch):
     generate_data_workflow(str(path))
 
     final = nbformat.read(str(path), as_version=4)
-    marked = [c for c in final.cells if "# provenance-combine-cell" in c.source]
-    assert len(marked) == 1
-    assert final.cells[-1] is marked[0]
-    assert any("_provbib_software" in c.source for c in final.cells)
-    assert any("_provbib_data_filtered_df2" in c.source for c in final.cells)
+    software = [c for c in final.cells if "provenance_software" in c.source]
+    data = [c for c in final.cells if "provenance_datasets" in c.source]
+    assert len(software) == 1
+    assert len(data) == 1
+    assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
+    assert "display(provenance_software)" in software[0].source
+    assert "display(provenance_datasets)" in data[0].source
+
+
+def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
+    """Notebooks from older runs carry a combine cell nothing manages anymore."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda code: [["filtered_df2", "LiPDGraph"]],
+    )
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "filtered_df2 = None"
+    ))
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "# provenance-combine-cell\nimport pandas as pd\ndisplay(provenance_bibliography)"
+    ))
+    path = tmp_path / "legacy.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    from data_workflow import generate_data_workflow
+    generate_data_workflow(str(path))
+
+    final = nbformat.read(str(path), as_version=4)
+    assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
+    assert sum("provenance_datasets" in c.source for c in final.cells) == 1
