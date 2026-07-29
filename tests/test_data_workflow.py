@@ -23,9 +23,9 @@ Design Decisions:
     - LiPDGraph retrieval must convert the terminal DataFrame to a LiPD object,
       so its cell references the DataFrame's dataSetName column and the LiPDVerse
       endpoint - asserted explicitly.
-    - Dataset provenance frames reuse the metadata DataFrame returned by the
-      source library, preserving its full schema in provenance_datasets.
-      Dataset-name targets filter that metadata after retrieval.
+    - Targeted PyLiPD and LiPDGraph cells load only the requested names; the
+      untargeted paths remain unchanged. PyleoTUPS keeps its existing
+      post-retrieval metadata filter.
     - Unsupported tools raise ValueError rather than silently emitting nothing.
 """
 
@@ -54,12 +54,19 @@ def test_pylipd_cell_calls_get_bibtex_on_variable():
     assert "D.get_bibtex(remote=True)" in cell
 
 
-def test_pylipd_cell_filters_metadata_after_retrieval():
+def test_targeted_pylipd_cell_loads_requested_names_directly():
     cell = build_retrieval_cell("D", "PyLiPD", dataset_names=["tr04evli"])
-    assert "D.get_bibtex(remote=True)" in cell
-    assert '_meta_D["dsname"].astype("string").str.casefold()' in cell
-    assert ".isin(_want_D)" in cell
-    assert "get_all_dataset_names" not in cell
+    assert "_lipd_D.load_remote_datasets(['tr04evli'])" in cell
+    assert "_bib_D, _meta_D = _lipd_D.get_bibtex(remote=True)" in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" not in cell
+    assert "_want_D" not in cell
+
+
+def test_targeted_pylipd_loads_only_requested_names():
+    cell = build_retrieval_cell("D", "PyLiPD", dataset_names=["TR04EVLI"])
+    assert "_lipd_D.load_remote_datasets(['TR04EVLI'])" in cell
+    assert "_bib_D, _meta_D = _lipd_D.get_bibtex(remote=True)" in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" not in cell
 
 
 def test_pyleotups_cell_calls_get_publications_on_variable():
@@ -82,14 +89,22 @@ def test_lipdgraph_cell_converts_dataframe_to_lipd():
     assert "get_bibtex(remote=True)" in cell
 
 
-def test_lipdgraph_cell_filters_metadata_after_retrieval():
+def test_targeted_lipdgraph_cell_loads_requested_names_directly():
     cell = build_retrieval_cell(
         "filtered_df2", "LiPDGraph", dataset_names=["tr04evli"]
     )
-    assert "filtered_df2[\"dataSetName\"].unique().tolist()" in cell
-    assert "_names_filtered_df2 = filtered_df2" in cell
-    assert '_meta_filtered_df2["dsname"].astype("string").str.casefold()' in cell
+    assert "_names_filtered_df2 = ['tr04evli']" in cell
+    assert 'filtered_df2["dataSetName"]' not in cell
     assert "load_remote_datasets(_names_filtered_df2)" in cell
+
+
+def test_targeted_lipdgraph_loads_only_requested_names():
+    cell = build_retrieval_cell(
+        "filtered_df2", "LiPDGraph", dataset_names=["TR04EVLI", "SP13CHPE"]
+    )
+    assert "_names_filtered_df2 = ['TR04EVLI', 'SP13CHPE']" in cell
+    assert "load_remote_datasets(_names_filtered_df2)" in cell
+    assert 'filtered_df2["dataSetName"]' not in cell
 
 
 def test_lipdgraph_cell_uses_supplied_endpoint():
@@ -104,7 +119,7 @@ def test_unsupported_tool_raises():
 
 @pytest.mark.parametrize("tool", ["PyLiPD", "PyleoTUPS", "LiPDGraph"])
 def test_every_block_binds_bib_and_meta_without_printing(tool):
-    """Retrieval blocks are fragments; the shared cell owns print and display."""
+    """Retrieval blocks bind citation metadata without printing."""
     block = build_retrieval_cell("D", tool)
     assert "_meta_D" in block and "_bib_D" in block
     assert "print(" not in block
@@ -216,7 +231,8 @@ def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatc
     assert pairs == [["filtered_df2", "LiPDGraph"]]
     generated = nbformat.read(str(output), as_version=4)
     retrieval = generated.cells[1].source
-    assert '_meta_filtered_df2["dsname"].astype("string").str.casefold()' in retrieval
+    assert "_names_filtered_df2 = ['tr04evli']" in retrieval
+    assert 'filtered_df2["dataSetName"]' not in retrieval
 
 
 def test_generate_data_workflow_rejects_both_target_aliases(tmp_path):
@@ -241,8 +257,10 @@ def test_inject_appends_exactly_one_cell_for_all_datasets():
     injected = code_cells[1].source
     assert "D.get_bibtex(remote=True)" in injected
     assert "ds.get_publications()" in injected
-    assert injected.count("display(provenance_datasets)") == 1
-    assert "pd.concat([_meta_D, _meta_ds], ignore_index=True)" in injected
+    assert "display(_meta_D)" in injected
+    assert "display(_meta_ds)" in injected
+    assert "pd.concat" not in injected
+    assert "provenance_datasets" not in injected
 
 
 def test_inject_with_no_pairs_appends_nothing():
@@ -252,31 +270,37 @@ def test_inject_with_no_pairs_appends_nothing():
     assert len(nb.cells) == 1
 
 
-# --- fmt parameter for APA rendering -----------------------------------------
+# --- BibTeX DataFrame output and fmt compatibility --------------------------
 
-def test_pylipd_cell_apa_renders_via_bibliography():
-    cell = build_dataset_cell([["D", "PyLiPD"]], fmt="apa")
-    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
-    assert "from bibliography import render_bibtex_strings_to_apa" in cell
-    assert "print(render_bibtex_strings_to_apa(_bib_D))" in cell
-
-
-def test_pyleotups_cell_apa_wraps_publications():
-    cell = build_dataset_cell([["ds", "PyleoTUPS"]], fmt="apa")
-    assert "ds.get_publications()" in cell
-    assert "render_bibtex_strings_to_apa(_bib_ds)" in cell
-
-
-def test_bibtex_fmt_is_unchanged_default():
+def test_bibtex_cell_keeps_the_returned_metadata_binding():
     cell = build_dataset_cell([["D", "PyLiPD"]])
-    assert 'print("\\n".join(_bib_D))' in cell
-    assert "render_bibtex_strings_to_apa" not in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
+    assert "display(_meta_D)" in cell
+    assert "provenance_datasets" not in cell
 
 
-def test_multi_dataset_cell_prints_every_bibliography_once():
+def test_dataset_cell_displays_metadata_frame_without_combining():
+    cell = build_dataset_cell([["D", "PyLiPD"]])
+    assert "D.get_bibtex(remote=True)" in cell
+    assert "import pandas as pd" not in cell
+    assert "pd.concat" not in cell
+    assert "provenance_datasets" not in cell
+    assert cell.rstrip().endswith("display(_meta_D)")
+
+
+def test_apa_fmt_is_accepted_but_output_neutral_until_typed_api():
+    bibtex = build_dataset_cell([["D", "PyLiPD"]], fmt="bibtex")
+    apa = build_dataset_cell([["D", "PyLiPD"]], fmt="apa")
+    assert apa == bibtex
+
+
+def test_multi_dataset_cell_displays_each_metadata_frame_without_concatenating():
     cell = build_dataset_cell([["D", "PyLiPD"], ["ds", "PyleoTUPS"]])
-    assert 'print("\\n".join(_bib_D + _bib_ds))' in cell
-    assert cell.count("print(") == 1
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
+    assert "ds.get_publications()" in cell
+    assert "pd.concat" not in cell
+    assert "display(_meta_D)" in cell
+    assert "display(_meta_ds)" in cell
 
 
 # --- cross-workflow integration -----------------------------------------------
@@ -306,12 +330,16 @@ def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
 
     final = nbformat.read(str(path), as_version=4)
     software = [c for c in final.cells if "provenance_software" in c.source]
-    data = [c for c in final.cells if "provenance_datasets" in c.source]
+    data = [
+        c for c in final.cells
+        if "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+    ]
     assert len(software) == 1
     assert len(data) == 1
     assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
     assert "display(provenance_software)" in software[0].source
-    assert "display(provenance_datasets)" in data[0].source
+    assert "display(_meta_filtered_df2)" in data[0].source
 
 
 def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
@@ -339,7 +367,11 @@ def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
 
     final = nbformat.read(str(path), as_version=4)
     assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
-    assert sum("provenance_datasets" in c.source for c in final.cells) == 1
+    assert sum(
+        "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+        for c in final.cells
+    ) == 1
 
 
 def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
@@ -364,5 +396,9 @@ def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
         generate_data_workflow(str(path))
 
     written = nbformat.read(str(path), as_version=4)
-    assert sum("provenance_datasets" in c.source for c in written.cells) == 1
+    assert sum(
+        "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+        for c in written.cells
+    ) == 1
     assert len(written.cells) == 2

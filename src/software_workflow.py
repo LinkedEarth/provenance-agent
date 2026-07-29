@@ -36,9 +36,9 @@ Design decisions:
     - Citations are surfaced as the injected cell's OUTPUT, not as this module's
       return value, so the contract matches cite_data: the return value is the
       list of libraries the metadata cell was built for.
-    - There is no combined software-plus-data frame. The two workflows produce
-      two independent, self-displaying cells (provenance_software and
-      provenance_datasets), so each can be read, re-run, or deleted on its own.
+    - There is no combined software-plus-data frame. The software workflow
+      produces a self-displaying cell, while the data workflow produces an
+      independent retrieval cell; each can be re-run or deleted on its own.
     - When no libraries match (empty notebook or a filter that hits nothing), no
       cell is injected and the notebook is left untouched, mirroring the data
       workflow's "nothing detected" path.

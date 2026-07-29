@@ -51,6 +51,7 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, Field
 
 from llm import llm
+from notebook_parser import PROVENANCE_CELL_MARKER
 from orchestrator import (
     cite_data,
     cite_data_tool,
@@ -290,10 +291,12 @@ def _new_cells(before: Counter, notebook) -> list:
 
 
 def _cell_tool(source: str) -> str:
-    """Classifies an injected cell by the frame it binds."""
+    """Classifies an injected cell by its software/data marker."""
     if "provenance_software" in source:
         return "software"
     if "provenance_datasets" in source:
+        return "data"
+    if PROVENANCE_CELL_MARKER in source:
         return "data"
     return "unknown"
 

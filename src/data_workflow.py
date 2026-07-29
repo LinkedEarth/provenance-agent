@@ -7,9 +7,11 @@ Purpose:
     cell that retrieves every dataset's BibTeX, and append it to the notebook
     with nbformat. The cell is meant to run in the notebook's own kernel, where
     the already-loaded objects (LiPD objects, PyleoTUPS datasets, the LiPDGraph
-    result DataFrame) are reused - no re-querying or re-loading. Its output is
-    the citations plus a provenance_datasets DataFrame. The fmt parameter
-    controls whether it prints raw BibTeX or renders APA.
+    result DataFrame) are reused for untargeted requests. Targeted PyLiPD and
+    LiPDGraph requests create a fresh LiPD object and load only the requested
+    dataset names. The generated cell binds the citation and metadata results
+    in the kernel and displays each returned metadata frame; it does not build
+    or display a combined metadata frame.
 
 Implementation:
     - extract_lipdgraph_endpoint(code): AST-scans the notebook for the
@@ -17,19 +19,18 @@ Implementation:
       the LiPDGraph pathway loads from the same repository the notebook queried.
     - build_retrieval_cell(variable, tool, endpoint, dataset_names): returns the
       retrieval block for one dataset - a fragment, not a standalone cell.
-      PyLiPD/PyleoTUPS call the library method directly on the in-memory object
-      (Approach C: {var}.{method}).
-      Optional dataSetName filters are applied case-insensitively and exactly to
-      the returned metadata DataFrame, after retrieval.
+      Untargeted PyLiPD/PyleoTUPS calls use the library method directly on the
+      in-memory object (Approach C: {var}.{method}). A targeted PyLiPD request
+      creates a fresh LiPD object and calls load_remote_datasets() with only
+      the requested names. A targeted LiPDGraph request passes those names
+      directly to load_remote_datasets() rather than reading every name from
+      the terminal DataFrame. PyleoTUPS retains its existing metadata filter.
       LiPDGraph is special: the terminal variable is a DataFrame, so the cell
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
-      from the endpoint, then calls get_bibtex(). When fmt="apa", the cell pipes
-      the collected BibTeX to bibliography.render_bibtex_strings_to_apa() for
-      APA rendering in-kernel.
+      from the endpoint, then calls get_bibtex().
     - build_dataset_cell(pairs, endpoint, fmt, dataset_names): composes one
-      retrieval block per dataset into the single injected cell, prints the
-      citations once, and concatenates every _meta_{variable} into one
-      provenance_datasets DataFrame that the cell displays.
+      retrieval block per dataset into the single injected cell, followed by a
+      display of each source's metadata frame.
     - filter_datasets(pairs, tool, variable): retains the legacy variable-level
       filter behavior.
     - split_targets(pairs, targets): separates detected variable names from
@@ -45,27 +46,23 @@ Implementation:
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
-      not execute them. Collecting the printed BibTeX happens at notebook runtime.
+      not execute them. Citation and metadata values remain available under
+      their generated _bib_{variable} and _meta_{variable} names, and each
+      metadata frame is displayed by the generated cell.
     - The LiPDGraph endpoint is lifted from the notebook via AST rather than
       hardcoded, so a notebook pointed at a different repository is handled
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
-    - Dataset-name filters are applied after get_bibtex()/get_publications() to
-      the source-provided metadata DataFrame. This keeps the source retrieval
-      path unchanged and lets provenance_datasets preserve every field returned
-      by the data library.
+    - Dataset-name targets are source-loading instructions for PyLiPD and
+      LiPDGraph, so targeted requests avoid loading unrelated datasets. The
+      PyleoTUPS post-retrieval filter is intentionally unchanged in this
+      iteration.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
-    - APA rendering happens in the injected cell (via render_bibtex_strings_to_apa)
-      so the user can see formatted citations as output without re-running code.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
-      (citations, metadata DataFrame). Each retrieval block keeps its
-      _meta_{variable} bound, and the cell pd.concat()s them into
-      provenance_datasets, so sources with different metadata columns produce
-      the union with nulls filled in.
-    - One cell for every dataset, not one per dataset, so the notebook gains
-      exactly two provenance cells at most: provenance_software and
-      provenance_datasets. The tradeoff is that a retrieval failure for one
-      dataset stops the whole cell.
+      (citations, metadata DataFrame), and each retrieval block keeps its
+      _meta_{variable} binding for callers that need it.
+    - One cell for every dataset source, not one per dataset, so a retrieval
+      failure for one source stops the whole cell.
 """
 
 import ast
@@ -121,8 +118,10 @@ def build_retrieval_cell(
     Builds one dataset's retrieval block for the shared dataset cell.
 
     This is a fragment, not a standalone cell: it leaves _bib_{variable} and
-    _meta_{variable} bound in the kernel and prints nothing. build_dataset_cell
-    concatenates one block per dataset and appends the shared print/display.
+    _meta_{variable} bound in the kernel and prints nothing. The containing
+    cell displays the metadata frame after all retrieval blocks run. Targeted
+    PyLiPD and LiPDGraph blocks load only the requested dataset names; PyleoTUPS
+    keeps its existing post-retrieval filter behavior.
 
     Args:
         variable: the notebook variable holding the dataset (from detection)
@@ -131,9 +130,8 @@ def build_retrieval_cell(
         endpoint: LiPDGraph only - the graph endpoint the notebook queried
             (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
             when None.
-        dataset_names: optional dataSetName values to match case-insensitively
-            and exactly in the returned metadata DataFrame. If the source does
-            not expose a ``dsname`` column, the metadata is left unchanged.
+        dataset_names: optional exact dataset names to load directly for PyLiPD
+            and LiPDGraph; PyleoTUPS retains its existing metadata filter.
 
     Returns:
         Python source binding _bib_{variable} and _meta_{variable}
@@ -144,14 +142,26 @@ def build_retrieval_cell(
     t = tool.lower()
 
     if t == "pylipd":
-        body = f"_bib_{variable}, _meta_{variable} = {variable}.get_bibtex(remote=True)\n"
+        if dataset_names:
+            body = (
+                "from pylipd.lipd import LiPD\n"
+                f"_lipd_{variable} = LiPD()\n"
+                f'_lipd_{variable}.set_endpoint("{endpoint or _LIPDVERSE_ENDPOINT}")\n'
+                f"_lipd_{variable}.load_remote_datasets({dataset_names!r})\n"
+                f"_bib_{variable}, _meta_{variable} = _lipd_{variable}.get_bibtex(remote=True)\n"
+            )
+        else:
+            body = f"_bib_{variable}, _meta_{variable} = {variable}.get_bibtex(remote=True)\n"
     elif t == "pyleotups":
         body = (
             f"_pub_{variable}, _meta_{variable} = {variable}.get_publications()\n"
             f'_bib_{variable} = [_pub_{variable}.to_string(bib_format="bibtex")]\n'
         )
     elif t == "lipdgraph":
-        names = f'_names_{variable} = {variable}["dataSetName"].unique().tolist()\n'
+        if dataset_names:
+            names = f"_names_{variable} = {dataset_names!r}\n"
+        else:
+            names = f'_names_{variable} = {variable}["dataSetName"].unique().tolist()\n'
         body = (
             "from pylipd.lipd import LiPD\n"
             + names
@@ -171,7 +181,7 @@ def build_retrieval_cell(
 
 
     metadata_filter = ""
-    if dataset_names:
+    if dataset_names and t == "pyleotups":
         metadata_filter = (
             f"_want_{variable} = {{name.casefold() for name in {dataset_names!r}}}\n"
             f"if \"dsname\" in _meta_{variable}.columns:\n"
@@ -192,49 +202,37 @@ def build_dataset_cell(
     """
     Builds the source for the single dataset-citation cell.
 
-    Composes one retrieval block per detected dataset, prints the collected
-    citations, and concatenates every per-dataset metadata frame into one
-    ``provenance_datasets`` DataFrame that the cell displays.
+    Composes one retrieval block per detected dataset. Each block leaves its
+    citation and metadata bindings in the notebook kernel. After the retrieval
+    blocks, the cell displays each source's ``_meta_{variable}`` DataFrame
+    individually; this builder does not concatenate or display a combined
+    ``provenance_datasets`` DataFrame.
 
     Args:
         pairs: the [variable, tool] pairs to retrieve citations for
         endpoint: LiPDGraph endpoint baked into any LiPDGraph block
-        fmt: "bibtex" (default) prints raw BibTeX; "apa" renders APA in-kernel
-        dataset_names: optional exact, case-insensitive dataSetName filters
+        dataset_names: optional exact dataset names passed to targeted
+            PyLiPD/LiPDGraph retrievals
 
     Returns:
-        Python source that, run in the notebook's kernel, prints the datasets'
-        citations and displays provenance_datasets
+        Python source that, run in the notebook's kernel, performs the
+        per-source citation retrievals and displays their metadata frames
 
     Raises:
         ValueError: if any pair names an unsupported dataset source
     """
-    variables = [pair[0] for pair in pairs]
-    blocks = "".join(
-        build_retrieval_cell(variable, tool, endpoint, dataset_names)
-        for variable, tool in pairs
-    )
-
-    collected = " + ".join(f"_bib_{variable}" for variable in variables)
-    if fmt == "apa":
-        out = (
-            "from bibliography import render_bibtex_strings_to_apa\n"
-            f"print(render_bibtex_strings_to_apa({collected}))\n"
-        )
-    else:
-        out = f'print("\\n".join({collected}))\n'
-
     # The marker goes on the cell, not on each retrieval block, since the block
     # is a fragment that never becomes a cell of its own.
     from notebook_parser import PROVENANCE_CELL_MARKER
 
-    frames = ", ".join(f"_meta_{variable}" for variable in variables)
-    display = (
-        "import pandas as pd\n"
-        f"provenance_datasets = pd.concat([{frames}], ignore_index=True)\n"
-        "display(provenance_datasets)"
+    blocks = "".join(
+        build_retrieval_cell(variable, tool, endpoint, dataset_names)
+        for variable, tool in pairs
     )
-    return f"{PROVENANCE_CELL_MARKER}\n" + blocks + out + display
+    displays = "".join(
+        f"display(_meta_{variable})\n" for variable, _ in pairs
+    )
+    return f"{PROVENANCE_CELL_MARKER}\n" + blocks + displays
 
 
 def filter_datasets(
@@ -310,8 +308,9 @@ def inject_retrieval_cells(
     """
     Appends the single dataset-citation cell covering every detected dataset.
 
-    One cell, not one per dataset, so the notebook gains exactly one cell whose
-    output is the datasets' citations and the provenance_datasets DataFrame.
+    One cell, not one per dataset, so the notebook gains exactly one retrieval
+    cell whose generated bindings hold the datasets' citation results and whose
+    output displays each metadata frame.
 
     Args:
         nb: an nbformat notebook node (modified in place)
@@ -320,7 +319,8 @@ def inject_retrieval_cells(
         endpoint: LiPDGraph endpoint to bake into any LiPDGraph block; falls
             back to _LIPDVERSE_ENDPOINT when None
         fmt: "bibtex" (default) or "apa" - citation format for the cell
-        dataset_names: optional exact, case-insensitive dataSetName filters
+        dataset_names: optional exact dataset names passed to targeted
+            PyLiPD/LiPDGraph retrievals
 
     Returns:
         the same notebook node, with the dataset cell appended
@@ -349,8 +349,9 @@ def generate_data_workflow(
 
     Reads the notebook, detects its dataset variables via the LLM, optionally
     filters them, appends the single dataset-citation cell, and writes the
-    notebook back. The user then runs that cell in the live kernel to print the
-    citations and see the provenance_datasets DataFrame as its output.
+    notebook back. The cell displays each source's metadata frame. Targeted
+    PyLiPD and LiPDGraph cells load only requested dataset names when the user
+    runs them in the live kernel.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify

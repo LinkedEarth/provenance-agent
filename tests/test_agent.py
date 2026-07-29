@@ -50,6 +50,14 @@ def test_tools_by_name_has_both():
     assert set(agent._TOOLS_BY_NAME) == {"cite_software", "cite_data"}
 
 
+def test_generated_retrieval_cell_is_classified_as_data_without_frame_binding():
+    source = (
+        "# provenance-agent-generated\n"
+        "_bib_D, _meta_D = D.get_bibtex(remote=True)\n"
+    )
+    assert agent._cell_tool(source) == "data"
+
+
 def _fake_model(decision):
     return RunnableLambda(
         lambda _prompt: AIMessage(content=json.dumps(decision))

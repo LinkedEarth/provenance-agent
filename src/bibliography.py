@@ -37,6 +37,7 @@ import yaml
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.bwriter import BibTexWriter
+from notebook_parser import PROVENANCE_CELL_MARKER
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
@@ -274,10 +275,18 @@ def remove_provenance_cells(nb, frame: str) -> None:
         nb: an nbformat notebook node (modified in place)
         frame: the bound frame name, SOFTWARE_FRAME or DATASETS_FRAME
     """
-    nb.cells = [
-        cell for cell in nb.cells
-        if not (cell.cell_type == "code" and f"{frame} = " in cell.source)
-    ]
+    def belongs_to_frame(cell) -> bool:
+        if cell.cell_type != "code":
+            return False
+        if f"{frame} = " in cell.source:
+            return True
+        return (
+            frame == DATASETS_FRAME
+            and PROVENANCE_CELL_MARKER in cell.source
+            and f"{SOFTWARE_FRAME} = " not in cell.source
+        )
+
+    nb.cells = [cell for cell in nb.cells if not belongs_to_frame(cell)]
 
 
 def remove_legacy_combine_cells(nb) -> None:

@@ -13,9 +13,11 @@ Implementation:
       pandas DataFrame of the software citations' metadata. Like cite_data, the
       citations exist as the injected cell's output, not as a return value.
     - cite_data(notebook_path, targets, fmt, output_path, detected_pairs): wraps
-      generate_data_workflow, which injects a retrieval cell per dataset whose
-      output is the citation. Data citations exist as cell output, not a return
-      value, because retrieval needs the live kernel objects. The optional
+      generate_data_workflow, which injects one retrieval cell for all detected
+      datasets. Targeted PyLiPD and LiPDGraph cells load only requested names;
+      retrieval results remain bound in the live kernel and the cell displays
+      each returned metadata frame rather than returning them from this
+      function. The optional
       `detected_pairs` is an internal reuse hook for the LCEL agent.
     - cite_software_tool / cite_data_tool: LangChain StructuredTool wrappers for
       direct/API use. Their descriptions document the same public contracts but
@@ -26,9 +28,8 @@ Design decisions:
       output, so their contracts are symmetric: each returns what it injected a
       cell for (cite_software -> library names, cite_data -> [variable, tool]
       pairs), never the citation text itself.
-    - fmt applies only to cite_data (whose cell can print BibTeX or render APA);
-      the software cell always outputs a metadata DataFrame, so cite_software has
-      no fmt argument.
+    - fmt applies only to cite_data and remains a compatibility argument.
+      cite_software has no fmt argument.
     - Workflow modules (software_workflow, data_workflow) are deferred into the
       functions so importing this module stays cheap. LangChain StructuredTool is
       imported at module level to build the tool instances at import time.
@@ -55,7 +56,7 @@ def cite_software(
     Detection is static (works even if the notebook was never run), and the
     injected cell builds a pandas DataFrame of the citations' metadata, so the
     citations appear as the cell's OUTPUT when the user runs it - not as this
-    function's return value (symmetric with cite_data).
+    function's return value.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -86,11 +87,13 @@ def cite_data(
     detected_pairs: list[list[str]] | None = None,
 ) -> list[list[str]]:
     """
-    Cites the datasets a notebook uses by injecting a retrieval cell per dataset.
+    Cites the datasets a notebook uses by injecting one retrieval cell for all
+    detected datasets.
 
     Detection is static (works even if the notebook was never run), but retrieval
-    reuses the live kernel objects, so the citations appear as the injected
-    cells' OUTPUT when the user runs them - not as this function's return value.
+    uses live kernel objects or targeted remote loads, so the results remain in
+    the generated cell's kernel bindings and its output displays each metadata
+    frame rather than returning them from this function.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify

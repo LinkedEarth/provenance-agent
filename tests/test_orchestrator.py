@@ -63,7 +63,7 @@ def test_cite_software_unimported_library_returns_empty(tmp_path):
     assert cite_software(SAMPLE, libraries=["definitely_not_here"], output_path=str(out)) == []
 
 
-def test_cite_data_injects_apa_cell(tmp_path, monkeypatch):
+def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
     import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
@@ -79,9 +79,13 @@ def test_cite_data_injects_apa_cell(tmp_path, monkeypatch):
 
     import nbformat
     out = nbformat.read(str(nb_out), as_version=4)
-    assert any("render_bibtex_strings_to_apa(_bib_filtered_df2)" in c.source for c in out.cells)
     assert any("repositories/LiPDVerse-dynamic" in c.source for c in out.cells)
-    assert "display(provenance_datasets)" in out.cells[-1].source
+    assert all("render_bibtex_strings_to_apa" not in c.source for c in out.cells)
+    assert all("print(" not in c.source for c in out.cells)
+    assert "provenance_datasets" not in out.cells[-1].source
+    assert "display(_meta_filtered_df2)" in out.cells[-1].source
+
+
 
 
 def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):

@@ -42,10 +42,10 @@ Design decisions:
       VSCode notebooks - the primary environment for this project. Auto-detect
       stays the default; the override is the recovery path.
     - Neither tool's citations exist yet when it returns: both inject cells whose
-      OUTPUT is the citation (cite_data a retrieval cell per dataset, cite_software
-      a single metadata-DataFrame cell). So each summary reports what was injected
-      and tells the user to run the cells, rather than implying citations were
-      produced.
+      OUTPUT is the citation (cite_data a retrieval cell that displays each
+      metadata frame, cite_software a single metadata-DataFrame cell). So each
+      summary reports what was injected and tells the user to run the cells,
+      rather than implying citations were produced.
     - Every workflow reads the .ipynb from disk, so unsaved cells are invisible.
       Empty results say so instead of being reported as the answer.
 """
@@ -150,8 +150,8 @@ def _format_result(call: dict) -> str:
         return (
             f"Injected a dataset cell into {notebook} for {len(result)} {noun}:\n"
             f"{lines}\n\n"
-            "Reload the notebook and run the new cell to print the citations and "
-            "see the provenance_datasets DataFrame."
+            "Reload the notebook and run the new cell to perform the retrieval; "
+            "its _bib_ and _meta_ results remain available in the kernel."
         )
 
     if call["name"] == "cite_software":
