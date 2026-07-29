@@ -29,9 +29,11 @@ The deterministic detector must answer two linked questions:
 
 ### Source-oriented static graph
 
-Implement a repository-native detector rather than copying the experimental
-script wholesale. It may reuse the experiment's versioned dependency graph
-ideas, but source identity is a first-class fact on each graph node.
+Implement the detector in a new standalone module,
+`src/deterministic_dataset_detection.py`, rather than changing the existing
+LLM detector or workflow modules. It may reuse the experiment's versioned
+dependency graph ideas, but source identity is a first-class fact on each graph
+node.
 
 The scanner processes code cells in notebook order, skips provenance-generated
 cells using the existing notebook parser helpers, parses each valid cell with
@@ -117,13 +119,13 @@ detect_datasets_in_notebook(notebook_path)
 It returns the existing `list[list[str]]` pair shape. There is no public
 `mode`, `analysis_methods`, or alternate detector argument.
 
-This task does not add interchangeable public pathways. The existing LLM
-workflow remains the active production path while the deterministic detector is
-validated against the notebook fixtures. The LLM implementation and prompt are
-not deleted; a commented integration point will show the future one-line switch
-to `detect_datasets_in_notebook(notebook_path)` once the deterministic detector
-is good enough. The deterministic implementation lives in a focused module and
-is exercised directly by its tests and manual fixture checks.
+This task does not add interchangeable public pathways or integrate the new
+detector into the active workflow. The existing LLM implementation, prompt,
+workflow, agent, orchestrator, and notebooks remain unchanged while the new
+detector is validated against fixtures. A future integration task can replace
+the current call with `detect_datasets_in_notebook(notebook_path)`; that switch
+is documented here rather than implemented now. The old pathway is therefore
+preserved without adding a public mode selector.
 
 ### PyleoTUPS target policy
 
@@ -146,8 +148,9 @@ workflow therefore distinguishes source selection from study-name selection:
   without mutation.
 
 The natural-language agent uses the existing warning envelope for this case.
-The direct workflow performs the same validation before notebook mutation and
-returns no dataset pairs when it cannot honor the request.
+The future workflow integration must perform the same validation before
+notebook mutation and return no dataset pairs when it cannot honor the request.
+This standalone detector task does not modify that workflow behavior.
 
 ### Conservative failure behavior
 
@@ -171,8 +174,14 @@ Tests will be written before implementation and will cover:
   runs;
 - the path-only deterministic detector entry point;
 - the unchanged legacy LLM implementation and its commented future switch;
-- PyleoTUPS all-data requests, source-variable selection, and unsupported
-  dataset-name warnings with zero notebook mutation.
+- PyleoTUPS source recognition when data reaches an analysis sink, while
+  unused search objects are excluded.
+
+The implementation test file is
+`tests/test_deterministic_dataset_detection.py`. No existing source, test,
+benchmark, or notebook file is modified in this task. The PyleoTUPS request
+policy is recorded here for the later integration task; standalone detector
+tests cover source recognition and analysis reachability, not request routing.
 
 Benchmark expectations will be revised where existing fixtures currently list
 datasets that are loaded or inspected but do not reach a scientific analysis
