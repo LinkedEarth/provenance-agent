@@ -70,10 +70,10 @@ canonical spelling.
 
 ### Analysis sinks
 
-Use a comprehensive deterministic default set based on the current tracer's
-analysis methods, expanded for the repository's paleoclimate workflows. The
-caller may provide `analysis_methods` to select an explicit set for a run, in
-the same style as `trace_notebook_dataframes(..., analysis_methods={...})`.
+Use a comprehensive deterministic set based on the current tracer's analysis
+methods, expanded for the repository's paleoclimate workflows. This registry is
+an internal implementation detail: the user supplies only the target notebook
+path and cannot configure analysis sinks.
 
 Analysis sinks include scientific modeling and statistical operations such as
 PCA/EOF, fitting and prediction, correlation, regression, coherence, spectral
@@ -105,26 +105,49 @@ order. Every traversal over a set is sorted by recorded source position and
 variable name, so repeated runs over unchanged code produce byte-for-byte
 identical results.
 
-### Interchangeable public pathways
+### Public API and transition
 
-Keep the current LLM behavior as the default for compatibility. Add a
-deterministic mode behind the same result shape:
+The deterministic detector's public entry point accepts only the target
+notebook path:
 
 ```python
-detect_datasets(code, mode="llm")
-detect_datasets(code, mode="deterministic")
+detect_datasets_in_notebook(notebook_path)
 ```
 
-The notebook-facing wrapper accepts the same mode and optional analysis
-configuration. Existing one-argument calls continue to use the LLM pathway.
-The data workflow exposes the mode as an opt-in parameter and passes it through
-to detection; its retrieval-cell behavior is unchanged. Both modes therefore
-remain interchangeable at the workflow boundary because they return the same
-`[variable, tool]` shape.
+It returns the existing `list[list[str]]` pair shape. There is no public
+`mode`, `analysis_methods`, or alternate detector argument.
 
-The LLM implementation, prompt, response parser, and existing callers are not
-removed. The deterministic implementation lives in a focused module so the
-two paths can be unit-tested independently.
+This task does not add interchangeable public pathways. The existing LLM
+workflow remains the active production path while the deterministic detector is
+validated against the notebook fixtures. The LLM implementation and prompt are
+not deleted; a commented integration point will show the future one-line switch
+to `detect_datasets_in_notebook(notebook_path)` once the deterministic detector
+is good enough. The deterministic implementation lives in a focused module and
+is exercised directly by its tests and manual fixture checks.
+
+### PyleoTUPS target policy
+
+PyleoTUPS source objects may contain multiple studies, but the user-facing
+request does not know the study names available inside a notebook variable. The
+workflow therefore distinguishes source selection from study-name selection:
+
+- an all-data request with no target (`targets=None`) cites every detected
+  analysis-used PyleoTUPS source, using the studies already held by that source
+  object;
+- a target that exactly matches a detected notebook source variable may select
+  that source object;
+- an unmatched target is treated as a requested dataset name. If the notebook
+  contains a PyleoTUPS source relevant to the request, the workflow returns a
+  warning explaining that a specific PyleoTUPS study cannot be selected because
+  its available names are not known, and recommends citing everything;
+- a request containing an unsupported PyleoTUPS study target is a no-op: it
+  must not remove old generated cells, write the notebook, or inject a new
+  retrieval cell. Mixed requests containing that unsupported target also abort
+  without mutation.
+
+The natural-language agent uses the existing warning envelope for this case.
+The direct workflow performs the same validation before notebook mutation and
+returns no dataset pairs when it cannot honor the request.
 
 ### Conservative failure behavior
 
@@ -142,12 +165,14 @@ Tests will be written before implementation and will cover:
 - PyleoTUPS object detection, including `get_data()` results and unused search
   objects;
 - xarray loading followed by transformations into an analyzed Dataset;
-- configurable and default analysis-sink registries;
+- the fixed internal analysis-sink registry and its excluded inspection methods;
 - aliases, filtering, loops, list accumulation, and object merges;
 - duplicate analysis calls and deterministic result ordering across repeated
   runs;
-- the unchanged LLM mode and mode dispatch behavior;
-- data-workflow callers receiving either detector's identical pair shape.
+- the path-only deterministic detector entry point;
+- the unchanged legacy LLM implementation and its commented future switch;
+- PyleoTUPS all-data requests, source-variable selection, and unsupported
+  dataset-name warnings with zero notebook mutation.
 
 Benchmark expectations will be revised where existing fixtures currently list
 datasets that are loaded or inspected but do not reach a scientific analysis
