@@ -3,27 +3,35 @@ Orchestrator: exposes the software and data workflows as two tools that route to
 the correct workflow with the correct arguments.
 
 Purpose:
-    A future natural-language agent ("@provenance agent, generate citations")
-    will route requests to these tools. For now they are called directly. Each
-    tool is a thin wrapper over existing functions - no new citation logic.
+    The natural-language LCEL agent routes requests to these two public tools;
+    direct callers can use them independently. Each tool is a thin wrapper over
+    an existing workflow - no new citation logic lives here.
 
 Implementation:
-    - cite_software(notebook_path, libraries, citation_types, fmt): in-process.
-      parse_notebook -> collect_library_entries (returns pd.DataFrame) -> render_apa (when fmt="apa").
-    - cite_data(notebook_path, targets, fmt, output_path): wraps
+    - cite_software(notebook_path, libraries, citation_types, output_path): wraps
+      generate_software_workflow, which injects a single cell that builds a
+      pandas DataFrame of the software citations' metadata. Like cite_data, the
+      citations exist as the injected cell's output, not as a return value.
+    - cite_data(notebook_path, targets, fmt, output_path, detected_pairs): wraps
       generate_data_workflow, which injects a retrieval cell per dataset whose
       output is the citation. Data citations exist as cell output, not a return
-      value, because retrieval needs the live kernel objects.
-    - cite_software_tool / cite_data_tool: LangChain StructuredTool wrappers whose
-      descriptions are the routing "system prompts".
+      value, because retrieval needs the live kernel objects. The optional
+      `detected_pairs` is an internal reuse hook for the LCEL agent.
+    - cite_software_tool / cite_data_tool: LangChain StructuredTool wrappers for
+      direct/API use. Their descriptions document the same public contracts but
+      are not bound to the LCEL classifier.
 
 Design decisions:
-    - fmt defaults to "apa" (the finished product is a human-readable
-      bibliography); fmt="bibtex" skips the Gemini call for the raw artifact.
-    - Workflow modules (notebook_parser, bibliography, data_workflow) are
-      deferred into the functions so importing this module stays cheap. LangChain
-      StructuredTool is imported at module level to build the tool instances at
-      import time (needed for agent routing).
+    - Both tools now mutate the notebook and surface results as injected-cell
+      output, so their contracts are symmetric: each returns what it injected a
+      cell for (cite_software -> library names, cite_data -> [variable, tool]
+      pairs), never the citation text itself.
+    - fmt applies only to cite_data (whose cell can print BibTeX or render APA);
+      the software cell always outputs a metadata DataFrame, so cite_software has
+      no fmt argument.
+    - Workflow modules (software_workflow, data_workflow) are deferred into the
+      functions so importing this module stays cheap. LangChain StructuredTool is
+      imported at module level to build the tool instances at import time.
 """
 
 _VALID_FMT = ("apa", "bibtex")
@@ -39,43 +47,35 @@ def cite_software(
     notebook_path: str,
     libraries: str | list[str] | None = None,
     citation_types: list[str] | None = None,
-    fmt: str = "apa",
-) -> str:
+    output_path: str | None = None,
+) -> list[str]:
     """
-    Cites the software libraries a notebook imports.
+    Cites the software libraries a notebook imports by injecting a metadata cell.
+
+    Detection is static (works even if the notebook was never run), and the
+    injected cell builds a pandas DataFrame of the citations' metadata, so the
+    citations appear as the cell's OUTPUT when the user runs it - not as this
+    function's return value (symmetric with cite_data).
 
     Args:
-        notebook_path: path to the .ipynb to analyze
+        notebook_path: path to the .ipynb to analyze and modify
         libraries: None (all imported libraries), a single name, or a list of
-            names to cite
+            names to cite; names not imported by the notebook are dropped
         citation_types: optional filter - "paper" and/or "software"
-        fmt: "apa" (default) or "bibtex"
+        output_path: where to write the modified notebook (defaults to in place)
 
     Returns:
-        the citation text (APA or BibTeX); when specific libraries were asked for
-        but are not imported, a note line is appended for each
+        the library names the injected metadata cell was built for (empty when
+        nothing matched)
     """
-    _check_fmt(fmt)
-    from notebook_parser import parse_notebook, validate_libraries
-    from bibliography import collect_library_entries, render_apa
+    from software_workflow import generate_software_workflow
 
-    available = parse_notebook(notebook_path)
-    if libraries is None:
-        wanted, not_found = available, []
-    else:
-        requested = [libraries] if isinstance(libraries, str) else list(libraries)
-        wanted, not_found = validate_libraries(requested, available)
-
-    entries = collect_library_entries(wanted, citation_types)
-    if fmt == "apa":
-        body = render_apa(entries)
-    else:
-        body = "\n\n".join(entries["bibtex"])
-
-    if not_found:
-        notes = "\n".join(f"[Not imported in notebook: {lib}]" for lib in not_found)
-        body = f"{body}\n\n{notes}" if body else notes
-    return body
+    return generate_software_workflow(
+        notebook_path,
+        libraries=libraries,
+        citation_types=citation_types,
+        output_path=output_path,
+    )
 
 
 def cite_data(
@@ -83,6 +83,7 @@ def cite_data(
     targets: str | list[str] | None = None,
     fmt: str = "apa",
     output_path: str | None = None,
+    detected_pairs: list[list[str]] | None = None,
 ) -> list[list[str]]:
     """
     Cites the datasets a notebook uses by injecting a retrieval cell per dataset.
@@ -96,6 +97,8 @@ def cite_data(
         targets: None (all detected datasets), a single variable name, or a list
         fmt: "apa" (default) or "bibtex"
         output_path: where to write the modified notebook (defaults to in place)
+        detected_pairs: optional precomputed detector result used internally by
+            the LCEL pipeline; normal callers should leave it as None
 
     Returns:
         the [variable, tool] pairs that had retrieval cells injected
@@ -105,9 +108,10 @@ def cite_data(
 
     return generate_data_workflow(
         notebook_path,
-        variable=targets,
+        targets=targets,
         output_path=output_path,
         fmt=fmt,
+        detected_pairs=detected_pairs,
     )
 
 
@@ -120,13 +124,30 @@ cite_software_tool = StructuredTool.from_function(
         "Cite the software libraries a Jupyter notebook imports. Use this for "
         "requests about citing software, packages, or libraries. Pass "
         "`notebook_path`; optionally `libraries` (a name or list to cite only "
-        "those), `citation_types` ('paper' and/or 'software'), and `fmt` "
-        "('apa' default, or 'bibtex')."
+        "those) and `citation_types` ('paper' and/or 'software'). This injects a "
+        "cell that builds a pandas DataFrame of the citation metadata; the user "
+        "runs it to produce the output."
     ),
 )
 
+
+def _cite_data_tool_entry(
+    notebook_path: str,
+    targets: str | list[str] | None = None,
+    fmt: str = "apa",
+    output_path: str | None = None,
+) -> list[list[str]]:
+    """Exposes cite_data to LangChain without its internal detector override."""
+    return cite_data(
+        notebook_path,
+        targets=targets,
+        fmt=fmt,
+        output_path=output_path,
+    )
+
+
 cite_data_tool = StructuredTool.from_function(
-    func=cite_data,
+    func=_cite_data_tool_entry,
     name="cite_data",
     description=(
         "Cite the datasets a Jupyter notebook uses (PyLiPD, PyleoTUPS, or "

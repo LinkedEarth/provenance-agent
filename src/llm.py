@@ -9,7 +9,7 @@ Purpose:
 Consumers:
     - dataset_detection.py imports `llm` for LLM-based dataset detection.
     - bibliography.py imports `bibtex_to_apa` for APA rendering.
-    - agent.py imports `llm` for bind_tools natural-language routing.
+    - agent.py imports `llm` for the LCEL classification stage.
 
 Implementation:
     - Loads GOOGLE_API_KEY from src/.env via dotenv.

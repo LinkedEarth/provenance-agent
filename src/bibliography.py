@@ -32,6 +32,7 @@ import os
 import sys
 
 import bibtexparser
+import nbformat
 import pandas as pd
 import yaml
 from bibtexparser.bibdatabase import BibDatabase
@@ -42,8 +43,10 @@ from bibtexparser.bwriter import BibTexWriter
 _STDLIB_MODULES = sys.stdlib_module_names
 _CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
 _DATAFRAME_COLUMNS = [
-    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex",
+    "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex", "note",
 ]
+
+_NO_CITATION_NOTE = "No citation found for imported library"
 
 
 def load_citation_index() -> dict:
@@ -100,6 +103,7 @@ def _add_entry_row(
         "year": entry.get("year", ""),
         "doi": doi,
         "bibtex": _entry_to_bibtex(entry),
+        "note": "",
     })
 
 
@@ -116,9 +120,9 @@ def collect_library_entries(
             means both
 
     Returns:
-        a DataFrame with one row per citation entry (columns: library,
-        citation_type, key, title, author, year, doi, bibtex); a library
-        with both a paper and a software citation produces two rows
+        a DataFrame with one row per citation entry and the uniform citation
+        columns (including ``note``); a library with both a paper and a
+        software citation produces two rows
     """
     index = load_citation_index()
     seen_dois: set[str] = set()
@@ -126,13 +130,12 @@ def collect_library_entries(
 
     for lib in libraries:
         lib_lower = lib.lower()
-        if lib_lower not in index:
-            continue
-
-        lib_entry = index[lib_lower] or {}
+        found_citation = False
+        lib_entry = index.get(lib_lower) or {}
 
         if (not citation_types or "paper" in citation_types) and "paper" in lib_entry:
             entry = bibtexparser.loads(lib_entry["paper"], parser=_bibtex_parser()).entries[0]
+            found_citation = True
             _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
@@ -140,8 +143,22 @@ def collect_library_entries(
             if os.path.exists(bib_path):
                 with open(bib_path) as f:
                     entries = bibtexparser.load(f, parser=_bibtex_parser()).entries
+                found_citation = bool(entries) or found_citation
                 for entry in entries:
                     _add_entry_row(rows, seen_dois, lib_lower, "software", entry)
+
+        if not found_citation:
+            rows.append({
+                "library": lib_lower,
+                "citation_type": None,
+                "key": None,
+                "title": None,
+                "author": None,
+                "year": None,
+                "doi": None,
+                "bibtex": None,
+                "note": _NO_CITATION_NOTE,
+            })
 
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
@@ -160,7 +177,11 @@ def render_apa(entries: pd.DataFrame) -> str:
     """
     from llm import bibtex_to_apa
 
-    citations = [bibtex_to_apa(bibtex) for bibtex in entries["bibtex"]]
+    citations = [
+        bibtex_to_apa(bibtex)
+        for bibtex in entries["bibtex"]
+        if bibtex
+    ]
     return "\n\n".join(citations)
 
 
@@ -184,6 +205,87 @@ def render_bibtex_strings_to_apa(bibtex_strings: list[str]) -> str:
         citations.append(apa)
 
     return "\n\n".join(citations)
+
+
+def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.DataFrame:
+    """
+    Parses raw BibTeX strings into the uniform citation DataFrame.
+
+    The DataFrame twin of render_bibtex_strings_to_apa: where that renders
+    dataset BibTeX to APA text, this renders it to the same citation schema
+    collect_library_entries produces, so software and dataset citations share
+    one shape and can be concatenated into the combined bibliography. The
+    schema includes a ``note`` column for imported libraries without a local
+    citation.
+
+    Args:
+        bibtex_strings: raw BibTeX entry strings (e.g. the data workflow's
+            _bib_{var} list from get_bibtex()/get_publications())
+        source: label written to the "library" column (the notebook variable
+            the datasets came from)
+
+    Returns:
+        a DataFrame with the uniform citation columns; citation_type is
+        "dataset" and rows are deduped by DOI
+    """
+    seen_dois: set[str] = set()
+    rows: list[dict] = []
+    for bibtex_str in bibtex_strings:
+        for entry in bibtexparser.loads(bibtex_str, parser=_bibtex_parser()).entries:
+            _add_entry_row(rows, seen_dois, source, "dataset", entry)
+    return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
+
+
+_COMBINE_MARKER = "# provenance-combine-cell"
+
+
+def build_combine_cell() -> str:
+    """
+    Builds the source for the combined-bibliography cell.
+
+    The cell scans the kernel namespace at run time for every _provbib_*
+    DataFrame (software binds _provbib_software; each data cell binds
+    _provbib_data_{var}) and concatenates them into provenance_bibliography.
+    Scanning at run time is what lets any subset resolve: software-only,
+    data-only, or both all produce the right combined frame without the
+    injector needing to know which segments ran.
+
+    Returns:
+        Python source that builds and display()s provenance_bibliography
+    """
+    columns = str(_DATAFRAME_COLUMNS)
+    return (
+        f"{_COMBINE_MARKER}\n"
+        "import pandas as pd\n"
+        "_frames = [v for k, v in sorted(globals().items())\n"
+        "           if k.startswith('_provbib_') and isinstance(v, pd.DataFrame)]\n"
+        "provenance_bibliography = (pd.concat(_frames, ignore_index=True)\n"
+        f"                          if _frames else pd.DataFrame(columns={columns}))\n"
+        "display(provenance_bibliography)"
+    )
+
+
+def ensure_combine_cell(nb: nbformat.NotebookNode) -> nbformat.NotebookNode:
+    """
+    Guarantees exactly one combine cell, positioned as the notebook's last cell.
+
+    Removes any existing marked combine cell, then appends a fresh one. Both
+    workflows call this after appending their own cells, so no matter which
+    workflow(s) ran or in what order, the notebook ends with a single combine
+    cell that runs after every segment cell.
+
+    Args:
+        nb: an nbformat notebook node (modified in place)
+
+    Returns:
+        the same notebook node, ending with exactly one combine cell
+    """
+    nb.cells = [
+        c for c in nb.cells
+        if not (c.cell_type == "code" and _COMBINE_MARKER in c.source)
+    ]
+    nb.cells.append(nbformat.v4.new_code_cell(build_combine_cell()))
+    return nb
 
 
 def generate_bibliography(
