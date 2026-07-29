@@ -23,8 +23,10 @@ Design decisions:
       so dispatch never guesses a target's category after classification.
     - An unclear request, missing requested software import, or data request
       with no detected data variables returns a warning and does not mutate the
-      notebook. An unknown dataSetName is allowed when data variables exist,
-      because the name can only be confirmed after the injected cell runs.
+      notebook. An unmatched target is allowed for PyLiPD/LiPDGraph data-name
+      loading, but a specific PyleoTUPS study-name request warns and does not
+      dispatch or mutate the notebook because its available names are only
+      known inside the live provider object.
     - The existing StructuredTool wrappers remain public for direct callers,
       but they are not bound to the classification model.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
@@ -217,6 +219,14 @@ def _resolve_targets(state: dict) -> dict:
         detected_pairs = _detect_dataset_pairs(state["notebook_path"])
         if not detected_pairs:
             return _warning_state(state, "No datasets were detected in the notebook.")
+        from data_workflow import pyleotups_target_warning
+
+        target_warning = pyleotups_target_warning(
+            detected_pairs,
+            data_targets,
+        )
+        if target_warning:
+            return _warning_state(state, target_warning)
         if data_targets is not None:
             detected_variables = {pair[0].casefold() for pair in detected_pairs}
             runtime_unverified = any(

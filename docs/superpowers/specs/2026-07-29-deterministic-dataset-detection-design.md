@@ -148,9 +148,10 @@ workflow therefore distinguishes source selection from study-name selection:
   without mutation.
 
 The natural-language agent uses the existing warning envelope for this case.
-The future workflow integration must perform the same validation before
-notebook mutation and return no dataset pairs when it cannot honor the request.
-This standalone detector task does not modify that workflow behavior.
+The workflow integration performs the same validation before notebook mutation
+and returns no dataset pairs when it cannot honor the request. The deterministic
+detector remains a separate future task; this policy change is implemented
+independently so the active workflow is safe while that detector is validated.
 
 ### Conservative failure behavior
 

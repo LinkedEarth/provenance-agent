@@ -31,6 +31,7 @@ Design Decisions:
 
 import os
 import sys
+import warnings
 
 import nbformat
 import pytest
@@ -198,6 +199,93 @@ def test_split_targets_dataset_name_applies_to_all_pairs():
 
 def test_split_targets_mixed_targets_keeps_all_for_name_filter():
     assert split_targets(PAIRS, ["ds", "TR04EVLI"]) == (PAIRS, ["TR04EVLI"])
+
+
+def test_pyleotups_study_target_warns_without_mutating_notebook(tmp_path, monkeypatch):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"]],
+    )
+
+    notebook = tmp_path / "pyleotups.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("ds = PangaeaDataset()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+    before = notebook.read_bytes()
+
+    from data_workflow import generate_data_workflow
+
+    with pytest.warns(UserWarning, match="specific PyleoTUPS"):
+        pairs = generate_data_workflow(
+            str(notebook),
+            targets="TR04EVLI",
+        )
+
+    assert pairs == []
+    assert notebook.read_bytes() == before
+
+
+@pytest.mark.parametrize("target", [None, "ds"])
+def test_pyleotups_all_or_source_variable_target_still_injects(
+    tmp_path, monkeypatch, target
+):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"]],
+    )
+
+    notebook = tmp_path / "pyleotups.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("ds = PangaeaDataset()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    from data_workflow import generate_data_workflow
+
+    pairs = generate_data_workflow(str(notebook), targets=target)
+
+    assert pairs == [["ds", "PyleoTUPS"]]
+    written = nbformat.read(str(notebook), as_version=4)
+    assert "ds.get_publications()" in written.cells[-1].source
+
+
+def test_pyleotups_warning_only_applies_to_requested_tool(tmp_path, monkeypatch):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"], ["df", "LiPDGraph"]],
+    )
+
+    notebook = tmp_path / "lipdgraph.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("df = pandas.DataFrame()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    from data_workflow import generate_data_workflow
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pairs = generate_data_workflow(
+            str(notebook),
+            tool="LiPDGraph",
+            targets="TR04EVLI",
+        )
+
+    assert not caught
+    assert pairs == [["df", "LiPDGraph"]]
 
 
 def test_filter_by_variable_str_still_works():

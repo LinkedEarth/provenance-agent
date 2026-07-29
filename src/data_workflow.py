@@ -24,7 +24,9 @@ Implementation:
       creates a fresh LiPD object and calls load_remote_datasets() with only
       the requested names. A targeted LiPDGraph request passes those names
       directly to load_remote_datasets() rather than reading every name from
-      the terminal DataFrame. PyleoTUPS retains its existing metadata filter.
+      the terminal DataFrame. PyleoTUPS uses its existing in-memory object for
+      untargeted retrieval; an unmatched specific study-name target warns and
+      is a no-op.
       LiPDGraph is special: the terminal variable is a DataFrame, so the cell
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
       from the endpoint, then calls get_bibtex().
@@ -53,9 +55,9 @@ Design decisions:
       hardcoded, so a notebook pointed at a different repository is handled
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Dataset-name targets are source-loading instructions for PyLiPD and
-      LiPDGraph, so targeted requests avoid loading unrelated datasets. The
-      PyleoTUPS post-retrieval filter is intentionally unchanged in this
-      iteration.
+      LiPDGraph, so targeted requests avoid loading unrelated datasets. A
+      specific PyleoTUPS study-name target cannot be resolved before the live
+      object runs, so it warns and leaves the notebook unchanged.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
@@ -298,6 +300,48 @@ def split_targets(
     return [pair for pair in pairs if pair[0] in variable_targets], []
 
 
+def pyleotups_target_warning(
+    pairs: list[list[str]],
+    targets: str | list[str] | None,
+) -> str | None:
+    """
+    Returns a warning when a target asks for a specific PyleoTUPS study name.
+
+    PyleoTUPS study names are only available inside the notebook's in-memory
+    provider object, so the workflow cannot select one by a user-supplied name
+    before executing the notebook's existing object. Selecting the detected
+    source variable itself remains supported.
+
+    Args:
+        pairs: detected [variable, tool] dataset pairs
+        targets: requested source variable names or dataset names
+
+    Returns:
+        a user-facing warning message, or None when the request is supported
+    """
+    if targets is None or targets == []:
+        return None
+
+    requested = [targets] if isinstance(targets, str) else list(targets)
+    variables = {pair[0].casefold() for pair in pairs}
+    unmatched = [
+        target for target in requested
+        if target.casefold() not in variables
+    ]
+    has_pyleotups = any(
+        tool.casefold() == "pyleotups"
+        for _, tool in pairs
+    )
+    if not unmatched or not has_pyleotups:
+        return None
+
+    return (
+        "Cannot cite a specific PyleoTUPS study by name because the available "
+        "study names are not known before the notebook runs. Ask to cite all "
+        "datasets instead."
+    )
+
+
 def inject_retrieval_cells(
     nb: nbformat.NotebookNode,
     pairs: list[list[str]],
@@ -351,7 +395,8 @@ def generate_data_workflow(
     filters them, appends the single dataset-citation cell, and writes the
     notebook back. The cell displays each source's metadata frame. Targeted
     PyLiPD and LiPDGraph cells load only requested dataset names when the user
-    runs them in the live kernel.
+    runs them in the live kernel. A specific PyleoTUPS study-name target emits
+    a warning and returns without changing the notebook.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
@@ -362,7 +407,9 @@ def generate_data_workflow(
         fmt: "bibtex" (default) or "apa" - format for citations in the
             injected cell
         targets: optional variable names and/or exact dataSetName values;
-            unmatched targets are applied inside retrieval cells
+            unmatched PyLiPD/LiPDGraph targets are applied inside retrieval
+            cells, while an unmatched target with a PyleoTUPS source warns and
+            performs no write
         detected_pairs: optional precomputed detector result used by the LCEL
             agent to avoid running dataset detection twice
 
@@ -377,11 +424,16 @@ def generate_data_workflow(
 
     code = read_notebook_code(notebook_path)
     detected = detect_datasets(code) if detected_pairs is None else detected_pairs
+    scoped_detected = filter_datasets(detected, tool=tool)
+    target = targets if targets is not None else variable
+    target_warning = pyleotups_target_warning(scoped_detected, target)
+    if target_warning:
+        warnings.warn(target_warning, UserWarning, stacklevel=2)
+        return []
     pairs, dataset_names = split_targets(
-        detected,
-        targets if targets is not None else variable,
+        scoped_detected,
+        target,
     )
-    pairs = filter_datasets(pairs, tool=tool)
     endpoint = extract_lipdgraph_endpoint(code)
 
     with open(notebook_path) as f:
