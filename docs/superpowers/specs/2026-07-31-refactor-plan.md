@@ -36,6 +36,31 @@ This task deliberately preserves the current project shape and public paths:
 Packaging, module renames, notebook reorganization, and public import-path
 migration are future tasks listed at the end of this document.
 
+## Overview principles
+
+These principles govern every implementation decision in this task:
+
+1. **Shortest correct code.** A change is worthwhile only when it removes
+   complexity or fixes a real contract problem. Do not introduce a new module,
+   type, wrapper, or migration layer merely to make the architecture look
+   different.
+2. **Delete rather than preserve dead code.** Remove code that is genuinely
+   unused and has no compatibility value. The retained LLM detector is an
+   explicit exception: it is a documented rollback path, so it must remain
+   deprecated and inactive rather than being treated as dead code.
+3. **Stop when a file is fine.** Do not reopen or reorganize modules whose
+   responsibilities and public behavior are already correct for this scope.
+4. **Preserve behavior and public paths.** Existing imports, signatures, tool
+   invocation, notebook mutation rules, and deterministic detector results
+   remain stable. The intentional exceptions are deleting APA rendering and
+   removing `fmt` validation while retaining `fmt` as an ignored parameter.
+5. **Keep one active data-detection path.** Deterministic detection is the
+   production path. The LLM detector is retained only as an explicitly marked
+   fallback and must not be called by normal detection.
+6. **Keep scope isolated.** Do not mix packaging, module renames, notebook
+   reorganization, benchmark changes, or unrelated user-worktree cleanup into
+   this task. Those belong to the tracked future-work items.
+
 ## Governing decisions
 
 ### Deterministic detection stays active
