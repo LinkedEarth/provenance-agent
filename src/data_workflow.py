@@ -24,7 +24,9 @@ Implementation:
       creates a fresh LiPD object and calls load_remote_datasets() with only
       the requested names. A targeted LiPDGraph request passes those names
       directly to load_remote_datasets() rather than reading every name from
-      the terminal DataFrame. PyleoTUPS retains its existing metadata filter.
+      the terminal DataFrame. PyleoTUPS uses its existing in-memory object for
+      untargeted retrieval; an unmatched specific study-name target warns and
+      is a no-op.
       LiPDGraph is special: the terminal variable is a DataFrame, so the cell
       pulls its dataSetName column, loads those datasets into a fresh LiPD object
       from the endpoint, then calls get_bibtex().
@@ -33,9 +35,9 @@ Implementation:
       display of each source's metadata frame.
     - filter_datasets(pairs, tool, variable): retains the legacy variable-level
       filter behavior.
-    - split_targets(pairs, targets): separates detected variable names from
-      unmatched dataSetName filters; unmatched names keep all detected pairs so
-      each retrieval cell can filter its returned metadata.
+    - split_targets(pairs, targets): treats every non-empty target as an exact
+      dataSetName filter and keeps all detected pairs so each retrieval cell
+      can handle that name for its own provider.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names): appends
       the single dataset cell covering every pair to an nbformat notebook node,
       or nothing when pairs is empty. fmt defaults to "bibtex" and accepts "apa"
@@ -53,9 +55,9 @@ Design decisions:
       hardcoded, so a notebook pointed at a different repository is handled
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Dataset-name targets are source-loading instructions for PyLiPD and
-      LiPDGraph, so targeted requests avoid loading unrelated datasets. The
-      PyleoTUPS post-retrieval filter is intentionally unchanged in this
-      iteration.
+      LiPDGraph, so targeted requests avoid loading unrelated datasets. A
+      specific PyleoTUPS study-name target cannot be resolved before the live
+      object runs, so it warns and leaves the notebook unchanged.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
@@ -266,36 +268,59 @@ def split_targets(
     targets: str | list[str] | None,
 ) -> tuple[list[list[str]], list[str]]:
     """
-    Splits requested targets into variable matches and dataset-name filters.
+    Treats requested targets as dataset names, never notebook variable names.
 
     Args:
         pairs: detected [variable, tool] dataset pairs
-        targets: None, a variable name, a dataSetName, or a list containing
-            either kind of target
+        targets: None, a dataSetName, or a list of dataSetName values
 
     Returns:
-        A tuple of (pairs_to_inject, dataset_names). Exact variable matches
-        select only those pairs when no dataset-name target is present. Any
-        unmatched target is treated as a dataSetName and keeps all detected
-        pairs so each retrieval source can apply its own filter.
+        A tuple of (pairs_to_inject, dataset_names). Every non-empty target is
+        passed to each detected provider as a dataset-name filter. The
+        notebook variable names in ``pairs`` are never user-selectable targets.
     """
     if targets is None or targets == []:
         return list(pairs), []
 
-    requested = [targets] if isinstance(targets, str) else list(targets)
-    variables = {pair[0].casefold(): pair[0] for pair in pairs}
-    variable_targets = {
-        variables[target.casefold()]
-        for target in requested
-        if target.casefold() in variables
-    }
-    dataset_names = [
-        target for target in requested if target.casefold() not in variables
-    ]
+    dataset_names = [targets] if isinstance(targets, str) else list(targets)
+    return list(pairs), dataset_names
 
-    if dataset_names:
-        return list(pairs), dataset_names
-    return [pair for pair in pairs if pair[0] in variable_targets], []
+
+def pyleotups_target_warning(
+    pairs: list[list[str]],
+    targets: str | list[str] | None,
+) -> str | None:
+    """
+    Returns a warning when a specific dataset/study target is requested while
+    a relevant PyleoTUPS source is present.
+
+    PyleoTUPS study names or IDs are only available inside the notebook's
+    in-memory provider object, so the workflow cannot safely select one by a
+    user-supplied dataset name before executing the notebook's existing object.
+    Notebook source variables are internal detector output, not valid targets.
+
+    Args:
+        pairs: detected [variable, tool] dataset pairs
+        targets: requested dataset names or study IDs
+
+    Returns:
+        a user-facing warning message, or None when the request is supported
+    """
+    if targets is None or targets == []:
+        return None
+
+    has_pyleotups = any(
+        tool.casefold() == "pyleotups"
+        for _, tool in pairs
+    )
+    if not has_pyleotups:
+        return None
+
+    return (
+        "Cannot cite a specific PyleoTUPS study by name because the available "
+        "study names are not known before the notebook runs. Ask to cite all "
+        "datasets instead."
+    )
 
 
 def inject_retrieval_cells(
@@ -351,18 +376,21 @@ def generate_data_workflow(
     filters them, appends the single dataset-citation cell, and writes the
     notebook back. The cell displays each source's metadata frame. Targeted
     PyLiPD and LiPDGraph cells load only requested dataset names when the user
-    runs them in the live kernel.
+    runs them in the live kernel. A specific PyleoTUPS study-name target emits
+    a warning and returns without changing the notebook.
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
         tool: optional tool filter (e.g. "PyLiPD")
-        variable: legacy variable-only filter. Use targets for new callers.
+        variable: deprecated source-variable selector; user-facing targeting
+            must use dataset names through ``targets``
         output_path: where to write the modified notebook (defaults to
             notebook_path, i.e. in place)
         fmt: "bibtex" (default) or "apa" - format for citations in the
             injected cell
-        targets: optional variable names and/or exact dataSetName values;
-            unmatched targets are applied inside retrieval cells
+        targets: optional exact dataSetName values or study IDs; targeted
+            PyLiPD/LiPDGraph names are applied inside retrieval cells, while a
+            non-empty target with a PyleoTUPS source warns and performs no write
         detected_pairs: optional precomputed detector result used by the LCEL
             agent to avoid running dataset detection twice
 
@@ -372,16 +400,23 @@ def generate_data_workflow(
     from dataset_detection import detect_datasets
     from notebook_parser import read_notebook_code
 
-    if targets is not None and variable is not None:
-        raise ValueError("pass either targets or variable, not both")
+    if variable is not None:
+        raise ValueError(
+            "source-variable targeting is unsupported; pass dataset names via targets"
+        )
 
     code = read_notebook_code(notebook_path)
     detected = detect_datasets(code) if detected_pairs is None else detected_pairs
+    scoped_detected = filter_datasets(detected, tool=tool)
+    target = targets
+    target_warning = pyleotups_target_warning(scoped_detected, target)
+    if target_warning:
+        warnings.warn(target_warning, UserWarning, stacklevel=2)
+        return []
     pairs, dataset_names = split_targets(
-        detected,
-        targets if targets is not None else variable,
+        scoped_detected,
+        target,
     )
-    pairs = filter_datasets(pairs, tool=tool)
     endpoint = extract_lipdgraph_endpoint(code)
 
     with open(notebook_path) as f:

@@ -166,6 +166,34 @@ def test_data_without_detected_pairs_warns_without_mutation(tmp_path, monkeypatc
     assert notebook.read_bytes() == before
 
 
+def test_specific_pyleotups_study_warns_without_mutation(tmp_path, monkeypatch):
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    before = notebook.read_bytes()
+    monkeypatch.setattr(
+        agent,
+        "_detect_dataset_pairs",
+        lambda _path: [["ds", "PyleoTUPS"]],
+    )
+    decision = {
+        "action": "cite",
+        "scope": "selected",
+        "targets": [{"kind": "data", "name": "TR04EVLI"}],
+        "fmt": "bibtex",
+    }
+
+    result = agent.build_chain(_fake_model(decision)).invoke({
+        "request": "cite TR04EVLI",
+        "notebook_path": str(notebook),
+    })
+
+    assert result["status"] == "warning"
+    assert "PyleoTUPS" in result["warning"]
+    assert "cite all" in result["warning"]
+    assert result["dispatch"] == []
+    assert notebook.read_bytes() == before
+
+
 def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatch):
     notebook = tmp_path / "sample.ipynb"
     shutil.copyfile(SAMPLE, notebook)

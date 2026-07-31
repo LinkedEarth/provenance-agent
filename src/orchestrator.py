@@ -97,7 +97,9 @@ def cite_data(
 
     Args:
         notebook_path: path to the .ipynb to analyze and modify
-        targets: None (all detected datasets), a single variable name, or a list
+        targets: None (all detected datasets), a dataset name or study ID, or
+            a list. Specific PyleoTUPS study targets are unsupported and return
+            a warning without changing the notebook.
         fmt: "apa" (default) or "bibtex"
         output_path: where to write the modified notebook (defaults to in place)
         detected_pairs: optional precomputed detector result used internally by
@@ -155,8 +157,10 @@ cite_data_tool = StructuredTool.from_function(
     description=(
         "Cite the datasets a Jupyter notebook uses (PyLiPD, PyleoTUPS, or "
         "LiPDGraph). Use this for requests about citing data or datasets. Pass "
-        "`notebook_path`; optionally `targets` (a variable name or list to cite "
-        "only those) and `fmt` ('apa' default, or 'bibtex'). This injects a "
-        "retrieval cell per dataset; the user runs it to produce the citation."
+        "`notebook_path`; optionally `targets` (dataset names or study IDs, as a "
+        "name or list, to cite only those) and `fmt` ('apa' default, or 'bibtex'). "
+        "Specific PyleoTUPS study targets return a warning without changing the "
+        "notebook. This injects a retrieval cell per dataset; the user runs it "
+        "to produce the citation."
     ),
 )
