@@ -17,12 +17,15 @@ Implementation:
     sink's dependency closure and selecting the nearest source-family boundary.
 
 Design decisions:
-    - This module is standalone. It does not replace or import the active LLM
-      detector, data workflow, agent, or orchestrator.
+    - This module is standalone and is used by the active dataset-detection
+      facade. It does not call an LLM or execute notebook code.
     - The scanner is conservative: syntax errors, opaque helper functions, and
       dynamic imports do not create guessed source lineage.
     - Source objects are not reported merely because they were loaded or
       searched. Their lineage must reach a configured analysis sink.
+    - Analysis calls without resolvable source lineage are retained as
+      diagnostics, so an empty pair list can be distinguished from an
+      analysis that may use an unsupported loader.
     - Notebook variables are internal result labels. User-facing target
       selection remains dataset-name based in the separate workflow layer.
     - Analysis and inspection registries are centralized so extending the
@@ -34,14 +37,24 @@ from __future__ import annotations
 import ast
 import warnings
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, TypedDict
 
 import nbformat
 
 from notebook_parser import is_generated_cell, strip_ipython_directives
 
 
-__all__ = ("detect_datasets_in_notebook",)
+__all__ = (
+    "detect_datasets_in_notebook",
+    "detect_datasets_with_diagnostics",
+)
+
+
+class DetectionDiagnostics(TypedDict):
+    """Structured result containing detected pairs and unresolved analyses."""
+
+    pairs: list[list[str]]
+    warnings: list[str]
 
 
 _GRAPH_ENDPOINT_PREFIX = (
@@ -960,8 +973,8 @@ class _NotebookGraph(ast.NodeVisitor):
         evaluation: _Eval,
         node: ast.Call,
     ) -> None:
-        """Records a source-backed analysis call."""
-        if not evaluation.source_ids or not _is_analysis_sink(name):
+        """Records an analysis call, including calls without source lineage."""
+        if not _is_analysis_sink(name):
             return
         self.sinks.append(
             _Sink(
@@ -1198,6 +1211,63 @@ class _NotebookGraph(ast.NodeVisitor):
             return None
         return max(candidates, key=lambda value: value.order)
 
+    def _sink_is_resolved(self, sink: _Sink) -> bool:
+        """Reports whether a sink reaches a usable recognized source boundary."""
+        closure = self._closure(sink.deps)
+        return any(
+            (source := self.sources.get(source_id)) is not None
+            and source.active
+            and self._candidate_for_source(source, sink, closure) is not None
+            for source_id in sink.source_ids
+        )
+
+    def diagnostic_warnings(self) -> list[str]:
+        """Returns warnings for analysis calls with unresolved source lineage."""
+        messages: list[str] = []
+        seen: set[str] = set()
+        for sink in self.sinks:
+            if self._sink_is_resolved(sink):
+                continue
+
+            location = (
+                f"cell {sink.order[0] + 1}, line {sink.order[1]}"
+            )
+            if not sink.source_ids:
+                message = (
+                    f"Analysis operation '{sink.name}' at {location} has no "
+                    "recognized dataset source lineage; the data may come "
+                    "from an unsupported loader or local computation."
+                )
+            else:
+                tools = sorted({
+                    self.sources[source_id].tool
+                    for source_id in sink.source_ids
+                    if source_id in self.sources
+                })
+                if tools and not any(
+                    self.sources[source_id].active
+                    for source_id in sink.source_ids
+                    if source_id in self.sources
+                ):
+                    message = (
+                        f"Analysis operation '{sink.name}' at {location} reaches "
+                        f"recognized source(s) {', '.join(tools)}, but they "
+                        "were not activated by a recognized load/data method; "
+                        "the loader may be unsupported."
+                    )
+                else:
+                    message = (
+                        f"Analysis operation '{sink.name}' at {location} has "
+                        "recognized source lineage, but it did not resolve to "
+                        "a citation dataset boundary; a transformation or "
+                        "loader may be unsupported."
+                    )
+
+            if message not in seen:
+                seen.add(message)
+                messages.append(message)
+        return messages
+
     def results(self) -> list[list[str]]:
         """Returns deterministic, deduplicated source/tool pairs."""
         pairs: dict[
@@ -1284,13 +1354,33 @@ def detect_datasets_in_notebook(notebook_path: str) -> list[list[str]]:
     Returns:
         deterministic [variable, tool] pairs, ordered by source position
     """
+    return detect_datasets_with_diagnostics(notebook_path)["pairs"]
+
+
+def detect_datasets_with_diagnostics(
+    notebook_path: str,
+) -> DetectionDiagnostics:
+    """
+    Detects dataset pairs and reports analysis calls without resolved sources.
+
+    Args:
+        notebook_path: path to the target .ipynb file
+
+    Returns:
+        a mapping with ``pairs`` for citation workflow compatibility and
+        ``warnings`` for analyses whose source lineage is unsupported or
+        otherwise unresolved
+    """
     graph = _NotebookGraph()
     for cell_index, source in _parse_code_cells(notebook_path):
         tree = _parse_tree(source)
         if tree is None:
             continue
         graph.process(tree, cell_index)
-    return graph.results()
+    return {
+        "pairs": graph.results(),
+        "warnings": graph.diagnostic_warnings(),
+    }
 
 
 if __name__ == "__main__":

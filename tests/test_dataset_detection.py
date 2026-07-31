@@ -98,3 +98,17 @@ def test_detect_datasets_uses_deterministic_notebook_path(tmp_path):
         nbformat.write(nb, handle)
 
     assert detect_datasets(str(notebook)) == [["filtered_df2", "LiPDGraph"]]
+
+
+def test_detect_datasets_warns_for_analysis_without_source_lineage(tmp_path):
+    notebook = tmp_path / "unknown_loader.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "import custom_loader\n"
+        "df = custom_loader.load_data('remote://example')\n"
+        "result = df.pca()\n"
+    )])
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    with pytest.warns(UserWarning, match="unsupported loader"):
+        assert detect_datasets(str(notebook)) == []

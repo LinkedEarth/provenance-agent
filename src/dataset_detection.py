@@ -19,11 +19,15 @@ Design decisions:
       can preserve notebook cell boundaries and ignore generated cells.
     - The former LLM implementation is commented out inside detect_datasets()
       rather than deleted, making the transition easy to inspect or reverse.
+    - detect_datasets() preserves its list return contract while emitting
+      UserWarning messages for unresolved analysis source lineage. Callers that
+      need structured diagnostics can use detect_datasets_with_diagnostics().
     - The prompt is spliced with str.replace("{code}", ...) rather than
       str.format() so notebook code containing braces can never break templating.
 """
 
 import json
+import warnings
 
 
 DETECTION_PROMPT = """Analyze a Jupyter notebook to identify which dataset source variables are actually used for
@@ -122,9 +126,25 @@ def detect_datasets(notebook_path: str) -> list[list[str]]:
     # response = llm.invoke(build_detection_prompt(code))
     # return parse_detection_response(message_text(response))
 
-    from deterministic_dataset_detection import detect_datasets_in_notebook
+    diagnostics = detect_datasets_with_diagnostics(notebook_path)
+    for message in diagnostics["warnings"]:
+        warnings.warn(message, UserWarning, stacklevel=2)
+    return diagnostics["pairs"]
 
-    return detect_datasets_in_notebook(notebook_path)
+
+def detect_datasets_with_diagnostics(notebook_path: str) -> dict[str, list]:
+    """
+    Detects dataset pairs and returns unresolved-analysis diagnostics.
+
+    Args:
+        notebook_path: path to the target .ipynb file
+
+    Returns:
+        a mapping with ``pairs`` and ``warnings`` keys
+    """
+    from deterministic_dataset_detection import detect_datasets_with_diagnostics
+
+    return detect_datasets_with_diagnostics(notebook_path)
 
 
 def detect_datasets_in_notebook(path: str) -> list[list[str]]:

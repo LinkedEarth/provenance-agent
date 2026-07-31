@@ -15,7 +15,10 @@ import nbformat
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from deterministic_dataset_detection import detect_datasets_in_notebook
+from deterministic_dataset_detection import (
+    detect_datasets_in_notebook,
+    detect_datasets_with_diagnostics,
+)
 
 
 def _write_notebook(path, code):
@@ -30,6 +33,48 @@ def test_public_entry_point_accepts_only_notebook_path():
     assert list(inspect.signature(detect_datasets_in_notebook).parameters) == [
         "notebook_path"
     ]
+
+
+def test_diagnostics_warn_when_analysis_has_unrecognized_source(tmp_path):
+    notebook = tmp_path / "unknown_loader.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import custom_loader
+
+df = custom_loader.load_data("remote://example")
+result = df.pca()
+""",
+    )
+
+    diagnostics = detect_datasets_with_diagnostics(str(notebook))
+
+    assert diagnostics["pairs"] == []
+    assert len(diagnostics["warnings"]) == 1
+    assert "pca" in diagnostics["warnings"][0]
+    assert "unsupported loader" in diagnostics["warnings"][0]
+
+
+def test_diagnostics_warn_when_recognized_source_is_not_activated(tmp_path):
+    notebook = tmp_path / "unrecognized_pyleotups_loader.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pyleotups import PangaeaDataset
+
+ds = PangaeaDataset()
+ds.fetch_studies()
+data = ds.get_data()
+result = data.pca()
+""",
+    )
+
+    diagnostics = detect_datasets_with_diagnostics(str(notebook))
+
+    assert diagnostics["pairs"] == []
+    assert len(diagnostics["warnings"]) == 1
+    assert "PyleoTUPS" in diagnostics["warnings"][0]
+    assert "activated" in diagnostics["warnings"][0]
 
 
 def test_path_only_entry_point_detects_lipdgraph_terminal_dataframe(tmp_path):
