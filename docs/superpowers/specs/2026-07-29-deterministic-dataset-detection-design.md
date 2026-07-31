@@ -1,12 +1,14 @@
 # Deterministic Dataset Detection Design
 
-**Status:** Proposed
+**Status:** Implemented as a standalone detector; workflow integration remains a
+separate transition task.
 
 ## Goal
 
 Add a deterministic, source-aware dataset detector that returns the same
 `[variable, tool]` pairs as the existing LLM pathway's public contract, while
-preserving the LLM detector and allowing callers to select either pathway.
+preserving the LLM detector and avoiding a public pathway selector during
+validation.
 Only dataset sources whose data reaches a recognized analysis operation are
 reported.
 
@@ -122,10 +124,10 @@ It returns the existing `list[list[str]]` pair shape. There is no public
 This task does not add interchangeable public pathways or integrate the new
 detector into the active workflow. The existing LLM implementation, prompt,
 workflow, agent, orchestrator, and notebooks remain unchanged while the new
-detector is validated against fixtures. A future integration task can replace
-the current call with `detect_datasets_in_notebook(notebook_path)`; that switch
-is documented here rather than implemented now. The old pathway is therefore
-preserved without adding a public mode selector.
+detector is validated against fixtures. A future transition task can replace
+the current detector call with `detect_datasets_in_notebook(notebook_path)`;
+that switch is documented here rather than implemented now. The old pathway
+is therefore preserved without adding a public mode selector.
 
 ### PyleoTUPS target policy
 
@@ -149,9 +151,9 @@ dataset/study-identifier requests:
   without mutation.
 
 The natural-language agent uses the existing warning envelope for this case.
-The workflow integration performs the same validation before notebook mutation
-and returns no dataset pairs when it cannot honor the request. The deterministic
-detector remains a separate future task; this policy change is implemented
+The active workflow performs the same validation before notebook mutation and
+returns no dataset pairs when it cannot honor the request. The deterministic
+detector remains a separate transition task; this policy is implemented
 independently so the active workflow is safe while that detector is validated.
 
 ### Conservative failure behavior
@@ -163,7 +165,7 @@ into an unsupported or speculative citation.
 
 ## Testing strategy
 
-Tests will be written before implementation and will cover:
+Tests cover:
 
 - LiPDGraph endpoint detection and the `df_res` → `filtered_df2` → PCA path;
 - PyLiPD object detection only when its loaded data reaches an analysis sink;
@@ -175,15 +177,18 @@ Tests will be written before implementation and will cover:
 - duplicate analysis calls and deterministic result ordering across repeated
   runs;
 - the path-only deterministic detector entry point;
-- the unchanged legacy LLM implementation and its commented future switch;
+- the unchanged legacy LLM implementation and the absence of a public mode
+  selector;
 - PyleoTUPS source recognition when data reaches an analysis sink, while
   unused search objects are excluded.
 
 The implementation test file is
-`tests/test_deterministic_dataset_detection.py`. No existing source, test,
-benchmark, or notebook file is modified in this task. The PyleoTUPS request
-policy is recorded here for the later integration task; standalone detector
-tests cover source recognition and analysis reachability, not request routing.
+`tests/test_deterministic_dataset_detection.py`. The detector task adds only
+its standalone source and test files; existing detector, workflow, benchmark,
+and notebook files remain unchanged by the detector transition. The PyleoTUPS
+request policy is implemented in the active workflow separately; standalone
+detector tests cover source recognition and analysis reachability, not request
+routing.
 
 Benchmark expectations will be revised where existing fixtures currently list
 datasets that are loaded or inspected but do not reach a scientific analysis
