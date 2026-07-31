@@ -11,7 +11,8 @@ without changing dataset-detection behavior or benchmark semantics.
 
 ## Goals
 
-- Install the project into the `lang` environment with `pip install -e .`.
+- Install the project and all supported workflow/test dependencies into the
+  `lang` environment with one command: `pip install -e .`.
 - Use `provenance_agent` as the Python import namespace and
   `provenance-agent` as the distribution name.
 - Remove `sys.path.insert(...)` and `sys.path.append(...)` from tests and
@@ -107,6 +108,11 @@ dependencies = [
   "langchain-core",
   "langchain-google-genai",
   "pydantic",
+  "ipython",
+  "ipynbname",
+  "pylipd",
+  "pyleotups",
+  "pytest",
 ]
 
 [tool.setuptools]
@@ -120,8 +126,9 @@ where = ["src"]
 provenance_agent = ["Citations/**/*"]
 ```
 
-The final project metadata must declare the runtime dependencies actually
-imported by the package, using their distributable names:
+The final project metadata must declare all dependencies needed by the package,
+tests, generated retrieval cells, and notebook magic, using their distributable
+names:
 
 - `nbformat`;
 - `bibtexparser`;
@@ -131,21 +138,16 @@ imported by the package, using their distributable names:
 - `python-dotenv`;
 - `langchain-core`;
 - `langchain-google-genai`; and
-- `pydantic`.
-
-Use optional extras for environment-specific dependencies:
-
-```toml
-[project.optional-dependencies]
-notebook = ["ipython", "ipynbname"]
-retrieval = ["pylipd", "pyleotups"]
-test = ["pytest"]
-```
+- `pydantic`;
+- `ipython`;
+- `ipynbname`;
+- `pylipd`;
+- `pyleotups`; and
+- `pytest`.
 
 `pylipd` and `pyleotups` are needed by generated cells in the target notebook
-kernel, not by static package import. The README/environment instructions must
-install the `notebook`, `retrieval`, and `test` extras in the `lang` environment
-for the full workflow.
+kernel, not by static package import, but they are included in the single
+installation for a predictable supported environment.
 
 The local `src/.env` file remains developer configuration and must not be
 packaged or committed. Installed use relies on environment variables or a
@@ -239,7 +241,7 @@ or duplicate the old implementation.
 
 `provenance_agent.magic` owns the implementation and imports
 `provenance_agent.agent` using package-qualified imports. The package extra
-`[notebook]` supplies IPython dependencies.
+dependencies supply the IPython requirements.
 
 Acceptance tests must verify both:
 
@@ -361,7 +363,7 @@ step because it requires API keys and remote services.
 
 The migration is complete when:
 
-1. `pip install -e ".[notebook,retrieval,test]"` succeeds in the `lang`
+1. `/opt/anaconda3/envs/lang/bin/pip install -e .` succeeds in the `lang`
    environment and `pip check` is clean.
 2. Package imports work from outside the repository root.
 3. `from provenance_agent import cite_data, cite_software` works without
