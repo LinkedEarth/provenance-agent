@@ -11,10 +11,10 @@ Implementation:
     build_retrieval_cell and filter_datasets are pure string/list functions.
     inject_retrieval_cells operates on an in-memory nbformat NotebookNode built
     with nbformat.v4.new_notebook(), so most tests do no file I/O and no live
-    kernel. The one exception is test_software_then_data_leaves_one_combine_cell_last,
+    kernel. The one exception is test_software_then_data_leaves_one_cell_each,
     an integration test that writes a notebook to tmp_path and reads it back to
-    confirm the software and data workflows leave a single combine cell last
-    across a real write/read roundtrip. The live-kernel execution (the user
+    confirm the two workflows leave exactly one self-displaying cell each across
+    a real write/read roundtrip. The live-kernel execution (the user
     running the injected cell) is out of scope for these tests.
 
 Design Decisions:
@@ -23,14 +23,15 @@ Design Decisions:
     - LiPDGraph retrieval must convert the terminal DataFrame to a LiPD object,
       so its cell references the DataFrame's dataSetName column and the LiPDVerse
       endpoint - asserted explicitly.
-    - Dataset provenance frames reuse the metadata DataFrame returned by the
-      source library, preserving its full schema for the combined output.
-      Dataset-name targets filter that metadata after retrieval.
+    - Targeted PyLiPD and LiPDGraph cells load only the requested names; the
+      untargeted paths remain unchanged. PyleoTUPS keeps its existing
+      post-retrieval metadata filter.
     - Unsupported tools raise ValueError rather than silently emitting nothing.
 """
 
 import os
 import sys
+import warnings
 
 import nbformat
 import pytest
@@ -41,6 +42,7 @@ from data_workflow import (
     build_retrieval_cell,
     extract_lipdgraph_endpoint,
     filter_datasets,
+    build_dataset_cell,
     inject_retrieval_cells,
     split_targets,
 )
@@ -53,12 +55,19 @@ def test_pylipd_cell_calls_get_bibtex_on_variable():
     assert "D.get_bibtex(remote=True)" in cell
 
 
-def test_pylipd_cell_filters_metadata_after_retrieval():
+def test_targeted_pylipd_cell_loads_requested_names_directly():
     cell = build_retrieval_cell("D", "PyLiPD", dataset_names=["tr04evli"])
-    assert "D.get_bibtex(remote=True)" in cell
-    assert '_meta_D["dsname"].astype("string").str.casefold()' in cell
-    assert ".isin(_want_D)" in cell
-    assert "get_all_dataset_names" not in cell
+    assert "_lipd_D.load_remote_datasets(['tr04evli'])" in cell
+    assert "_bib_D, _meta_D = _lipd_D.get_bibtex(remote=True)" in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" not in cell
+    assert "_want_D" not in cell
+
+
+def test_targeted_pylipd_loads_only_requested_names():
+    cell = build_retrieval_cell("D", "PyLiPD", dataset_names=["TR04EVLI"])
+    assert "_lipd_D.load_remote_datasets(['TR04EVLI'])" in cell
+    assert "_bib_D, _meta_D = _lipd_D.get_bibtex(remote=True)" in cell
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" not in cell
 
 
 def test_pyleotups_cell_calls_get_publications_on_variable():
@@ -81,14 +90,22 @@ def test_lipdgraph_cell_converts_dataframe_to_lipd():
     assert "get_bibtex(remote=True)" in cell
 
 
-def test_lipdgraph_cell_filters_metadata_after_retrieval():
+def test_targeted_lipdgraph_cell_loads_requested_names_directly():
     cell = build_retrieval_cell(
         "filtered_df2", "LiPDGraph", dataset_names=["tr04evli"]
     )
-    assert "filtered_df2[\"dataSetName\"].unique().tolist()" in cell
-    assert "_names_filtered_df2 = filtered_df2" in cell
-    assert '_meta_filtered_df2["dsname"].astype("string").str.casefold()' in cell
+    assert "_names_filtered_df2 = ['tr04evli']" in cell
+    assert 'filtered_df2["dataSetName"]' not in cell
     assert "load_remote_datasets(_names_filtered_df2)" in cell
+
+
+def test_targeted_lipdgraph_loads_only_requested_names():
+    cell = build_retrieval_cell(
+        "filtered_df2", "LiPDGraph", dataset_names=["TR04EVLI", "SP13CHPE"]
+    )
+    assert "_names_filtered_df2 = ['TR04EVLI', 'SP13CHPE']" in cell
+    assert "load_remote_datasets(_names_filtered_df2)" in cell
+    assert 'filtered_df2["dataSetName"]' not in cell
 
 
 def test_lipdgraph_cell_uses_supplied_endpoint():
@@ -102,11 +119,12 @@ def test_unsupported_tool_raises():
 
 
 @pytest.mark.parametrize("tool", ["PyLiPD", "PyleoTUPS", "LiPDGraph"])
-def test_every_cell_binds_provbib_data_and_drops_meta_display(tool):
-    cell = build_retrieval_cell("D", tool)
-    assert "_provbib_data_D = _meta_D" in cell
-    assert "render_bibtex_strings_to_df" not in cell
-    assert "display(_meta_D)" not in cell
+def test_every_block_binds_bib_and_meta_without_printing(tool):
+    """Retrieval blocks bind citation metadata without printing."""
+    block = build_retrieval_cell("D", tool)
+    assert "_meta_D" in block and "_bib_D" in block
+    assert "print(" not in block
+    assert "display(" not in block
 
 
 # --- extract_lipdgraph_endpoint ----------------------------------------------
@@ -171,8 +189,8 @@ def test_split_targets_empty_keeps_all_without_dataset_names():
     assert split_targets(PAIRS, []) == (PAIRS, [])
 
 
-def test_split_targets_variable_target_keeps_matching_pair():
-    assert split_targets(PAIRS, "ds") == ([PAIRS[1]], [])
+def test_split_targets_treats_variable_like_any_dataset_name():
+    assert split_targets(PAIRS, "ds") == (PAIRS, ["ds"])
 
 
 def test_split_targets_dataset_name_applies_to_all_pairs():
@@ -180,7 +198,97 @@ def test_split_targets_dataset_name_applies_to_all_pairs():
 
 
 def test_split_targets_mixed_targets_keeps_all_for_name_filter():
-    assert split_targets(PAIRS, ["ds", "TR04EVLI"]) == (PAIRS, ["TR04EVLI"])
+    assert split_targets(PAIRS, ["ds", "TR04EVLI"]) == (
+        PAIRS,
+        ["ds", "TR04EVLI"],
+    )
+
+
+@pytest.mark.parametrize("target", ["TR04EVLI", "ds"])
+def test_pyleotups_target_warns_without_mutating_notebook(
+    tmp_path, monkeypatch, target
+):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"]],
+    )
+
+    notebook = tmp_path / "pyleotups.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("ds = PangaeaDataset()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+    before = notebook.read_bytes()
+
+    from data_workflow import generate_data_workflow
+
+    with pytest.warns(UserWarning, match="specific PyleoTUPS"):
+        pairs = generate_data_workflow(
+            str(notebook),
+            targets=target,
+        )
+
+    assert pairs == []
+    assert notebook.read_bytes() == before
+
+
+def test_pyleotups_all_datasets_request_still_injects(tmp_path, monkeypatch):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"]],
+    )
+
+    notebook = tmp_path / "pyleotups.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("ds = PangaeaDataset()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    from data_workflow import generate_data_workflow
+
+    pairs = generate_data_workflow(str(notebook))
+
+    assert pairs == [["ds", "PyleoTUPS"]]
+    written = nbformat.read(str(notebook), as_version=4)
+    assert "ds.get_publications()" in written.cells[-1].source
+
+
+def test_pyleotups_warning_only_applies_to_requested_tool(tmp_path, monkeypatch):
+    import dataset_detection
+
+    monkeypatch.setattr(
+        dataset_detection,
+        "detect_datasets",
+        lambda _code: [["ds", "PyleoTUPS"], ["df", "LiPDGraph"]],
+    )
+
+    notebook = tmp_path / "lipdgraph.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("df = pandas.DataFrame()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    from data_workflow import generate_data_workflow
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pairs = generate_data_workflow(
+            str(notebook),
+            tool="LiPDGraph",
+            targets="TR04EVLI",
+        )
+
+    assert not caught
+    assert pairs == [["df", "LiPDGraph"]]
 
 
 def test_filter_by_variable_str_still_works():
@@ -214,56 +322,80 @@ def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatc
     assert pairs == [["filtered_df2", "LiPDGraph"]]
     generated = nbformat.read(str(output), as_version=4)
     retrieval = generated.cells[1].source
-    assert '_meta_filtered_df2["dsname"].astype("string").str.casefold()' in retrieval
+    assert "_names_filtered_df2 = ['tr04evli']" in retrieval
+    assert 'filtered_df2["dataSetName"]' not in retrieval
 
 
-def test_generate_data_workflow_rejects_both_target_aliases(tmp_path):
+def test_generate_data_workflow_rejects_variable_targets(tmp_path):
     from data_workflow import generate_data_workflow
 
-    with pytest.raises(ValueError, match="either targets or variable"):
+    with pytest.raises(ValueError, match="source-variable targeting"):
         generate_data_workflow(
             str(tmp_path / "missing.ipynb"),
             variable="D",
-            targets="TR04EVLI",
         )
 
 
 # --- inject_retrieval_cells --------------------------------------------------
 
-def test_inject_appends_one_code_cell_per_pair():
+def test_inject_appends_exactly_one_cell_for_all_datasets():
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell("df_res = pd.read_csv(data)"))
     inject_retrieval_cells(nb, [["D", "PyLiPD"], ["ds", "PyleoTUPS"]])
     code_cells = [c for c in nb.cells if c.cell_type == "code"]
-    assert len(code_cells) == 3  # original + 2 injected
-    assert "D.get_bibtex(remote=True)" in code_cells[1].source
-    assert "ds.get_publications()" in code_cells[2].source
+    assert len(code_cells) == 2  # original + 1 injected
+    injected = code_cells[1].source
+    assert "D.get_bibtex(remote=True)" in injected
+    assert "ds.get_publications()" in injected
+    assert "display(_meta_D)" in injected
+    assert "display(_meta_ds)" in injected
+    assert "pd.concat" not in injected
+    assert "provenance_datasets" not in injected
 
 
-# --- fmt parameter for APA rendering -----------------------------------------
+def test_inject_with_no_pairs_appends_nothing():
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("x = 1"))
+    inject_retrieval_cells(nb, [])
+    assert len(nb.cells) == 1
 
-def test_pylipd_cell_apa_renders_via_bibliography():
-    cell = build_retrieval_cell("D", "PyLiPD", fmt="apa")
+
+# --- BibTeX DataFrame output and fmt compatibility --------------------------
+
+def test_bibtex_cell_keeps_the_returned_metadata_binding():
+    cell = build_dataset_cell([["D", "PyLiPD"]])
     assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
-    assert "from bibliography import render_bibtex_strings_to_apa" in cell
-    assert "print(render_bibtex_strings_to_apa(_bib_D))" in cell
+    assert "display(_meta_D)" in cell
+    assert "provenance_datasets" not in cell
 
 
-def test_pyleotups_cell_apa_wraps_publications():
-    cell = build_retrieval_cell("ds", "PyleoTUPS", fmt="apa")
+def test_dataset_cell_displays_metadata_frame_without_combining():
+    cell = build_dataset_cell([["D", "PyLiPD"]])
+    assert "D.get_bibtex(remote=True)" in cell
+    assert "import pandas as pd" not in cell
+    assert "pd.concat" not in cell
+    assert "provenance_datasets" not in cell
+    assert cell.rstrip().endswith("display(_meta_D)")
+
+
+def test_apa_fmt_is_accepted_but_output_neutral_until_typed_api():
+    bibtex = build_dataset_cell([["D", "PyLiPD"]], fmt="bibtex")
+    apa = build_dataset_cell([["D", "PyLiPD"]], fmt="apa")
+    assert apa == bibtex
+
+
+def test_multi_dataset_cell_displays_each_metadata_frame_without_concatenating():
+    cell = build_dataset_cell([["D", "PyLiPD"], ["ds", "PyleoTUPS"]])
+    assert "_bib_D, _meta_D = D.get_bibtex(remote=True)" in cell
     assert "ds.get_publications()" in cell
-    assert "render_bibtex_strings_to_apa(_bib_ds)" in cell
-
-
-def test_bibtex_fmt_is_unchanged_default():
-    cell = build_retrieval_cell("D", "PyLiPD")
-    assert 'print("\\n".join(_bib_D))' in cell
-    assert "render_bibtex_strings_to_apa" not in cell
+    assert "pd.concat" not in cell
+    assert "display(_meta_D)" in cell
+    assert "display(_meta_ds)" in cell
 
 
 # --- cross-workflow integration -----------------------------------------------
 
-def test_software_then_data_leaves_one_combine_cell_last(tmp_path, monkeypatch):
+def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
     import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
@@ -287,8 +419,76 @@ def test_software_then_data_leaves_one_combine_cell_last(tmp_path, monkeypatch):
     generate_data_workflow(str(path))
 
     final = nbformat.read(str(path), as_version=4)
-    marked = [c for c in final.cells if "# provenance-combine-cell" in c.source]
-    assert len(marked) == 1
-    assert final.cells[-1] is marked[0]
-    assert any("_provbib_software" in c.source for c in final.cells)
-    assert any("_provbib_data_filtered_df2" in c.source for c in final.cells)
+    software = [c for c in final.cells if "provenance_software" in c.source]
+    data = [
+        c for c in final.cells
+        if "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+    ]
+    assert len(software) == 1
+    assert len(data) == 1
+    assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
+    assert "display(provenance_software)" in software[0].source
+    assert "display(_meta_filtered_df2)" in data[0].source
+
+
+def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
+    """Notebooks from older runs carry a combine cell nothing manages anymore."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda code: [["filtered_df2", "LiPDGraph"]],
+    )
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "filtered_df2 = None"
+    ))
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "# provenance-combine-cell\nimport pandas as pd\ndisplay(provenance_bibliography)"
+    ))
+    path = tmp_path / "legacy.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    from data_workflow import generate_data_workflow
+    generate_data_workflow(str(path))
+
+    final = nbformat.read(str(path), as_version=4)
+    assert "# provenance-combine-cell" not in "".join(c.source for c in final.cells)
+    assert sum(
+        "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+        for c in final.cells
+    ) == 1
+
+
+def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
+    """One dataset cell means one, however many times the workflow runs."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda code: [["filtered_df2", "LiPDGraph"]],
+    )
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "filtered_df2 = None"
+    ))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    from data_workflow import generate_data_workflow
+    for _ in range(3):
+        generate_data_workflow(str(path))
+
+    written = nbformat.read(str(path), as_version=4)
+    assert sum(
+        "# provenance-agent-generated" in c.source
+        and "provenance_software" not in c.source
+        for c in written.cells
+    ) == 1
+    assert len(written.cells) == 2

@@ -32,12 +32,12 @@ import os
 import sys
 
 import bibtexparser
-import nbformat
 import pandas as pd
 import yaml
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.bwriter import BibTexWriter
+from notebook_parser import PROVENANCE_CELL_MARKER
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
@@ -54,6 +54,23 @@ def load_citation_index() -> dict:
     yml_path = os.path.join(_CITATIONS_DIR, "library_citations.yml")
     with open(yml_path) as f:
         return yaml.safe_load(f)
+
+
+def is_stdlib(library: str) -> bool:
+    """
+    Reports whether a library name is part of the Python standard library.
+
+    Standard-library modules ship with the interpreter and nobody cites them, so
+    they are dropped from an import list outright rather than being reported as
+    libraries whose citation is missing.
+
+    Args:
+        library: a top-level module name from parse_notebook()
+
+    Returns:
+        True if the name is a standard-library module
+    """
+    return library.lower() in _STDLIB_MODULES
 
 
 def _bibtex_parser() -> BibTexParser:
@@ -130,6 +147,8 @@ def collect_library_entries(
 
     for lib in libraries:
         lib_lower = lib.lower()
+        if is_stdlib(lib_lower):
+            continue
         found_citation = False
         lib_entry = index.get(lib_lower) or {}
 
@@ -214,7 +233,7 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
     The DataFrame twin of render_bibtex_strings_to_apa: where that renders
     dataset BibTeX to APA text, this renders it to the same citation schema
     collect_library_entries produces, so software and dataset citations share
-    one shape and can be concatenated into the combined bibliography. The
+    one shape and can be concatenated by a caller that wants both. The
     schema includes a ``note`` column for imported libraries without a local
     citation.
 
@@ -236,56 +255,56 @@ def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.Da
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
 
-_COMBINE_MARKER = "# provenance-combine-cell"
+_LEGACY_COMBINE_MARKER = "# provenance-combine-cell"
+
+SOFTWARE_FRAME = "provenance_software"
+DATASETS_FRAME = "provenance_datasets"
 
 
-def build_combine_cell() -> str:
+def remove_provenance_cells(nb, frame: str) -> None:
     """
-    Builds the source for the combined-bibliography cell.
+    Drops any previously injected cell that binds the given provenance frame.
 
-    The cell scans the kernel namespace at run time for every _provbib_*
-    DataFrame (software binds _provbib_software; each data cell binds
-    _provbib_data_{var}) and concatenates them into provenance_bibliography.
-    Scanning at run time is what lets any subset resolve: software-only,
-    data-only, or both all produce the right combined frame without the
-    injector needing to know which segments ran.
-
-    Returns:
-        Python source that builds and display()s provenance_bibliography
-    """
-    columns = str(_DATAFRAME_COLUMNS)
-    return (
-        f"{_COMBINE_MARKER}\n"
-        "import pandas as pd\n"
-        "_frames = [v for k, v in sorted(globals().items())\n"
-        "           if k.startswith('_provbib_') and isinstance(v, pd.DataFrame)]\n"
-        "provenance_bibliography = (pd.concat(_frames, ignore_index=True)\n"
-        f"                          if _frames else pd.DataFrame(columns={columns}))\n"
-        "display(provenance_bibliography)"
-    )
-
-
-def ensure_combine_cell(nb: nbformat.NotebookNode) -> nbformat.NotebookNode:
-    """
-    Guarantees exactly one combine cell, positioned as the notebook's last cell.
-
-    Removes any existing marked combine cell, then appends a fresh one. Both
-    workflows call this after appending their own cells, so no matter which
-    workflow(s) ran or in what order, the notebook ends with a single combine
-    cell that runs after every segment cell.
+    Injection appends, so without this a second run would leave the notebook
+    with two software cells (or two dataset cells) that disagree - the stale one
+    still displaying whatever the earlier run found. Each workflow calls this
+    for its own frame before appending, so re-running is idempotent and the
+    notebook holds exactly one cell per workflow.
 
     Args:
         nb: an nbformat notebook node (modified in place)
+        frame: the bound frame name, SOFTWARE_FRAME or DATASETS_FRAME
+    """
+    def belongs_to_frame(cell) -> bool:
+        if cell.cell_type != "code":
+            return False
+        if f"{frame} = " in cell.source:
+            return True
+        return (
+            frame == DATASETS_FRAME
+            and PROVENANCE_CELL_MARKER in cell.source
+            and f"{SOFTWARE_FRAME} = " not in cell.source
+        )
 
-    Returns:
-        the same notebook node, ending with exactly one combine cell
+    nb.cells = [cell for cell in nb.cells if not belongs_to_frame(cell)]
+
+
+def remove_legacy_combine_cells(nb) -> None:
+    """
+    Strips the combined-bibliography cell earlier versions used to inject.
+
+    The two workflows now each own one self-displaying cell, so nothing creates
+    this cell anymore. Notebooks run against an older version still carry one,
+    and since no code manages it now it would linger forever and re-display a
+    stale bibliography. Both workflows call this before writing.
+
+    Args:
+        nb: an nbformat notebook node (modified in place)
     """
     nb.cells = [
-        c for c in nb.cells
-        if not (c.cell_type == "code" and _COMBINE_MARKER in c.source)
+        cell for cell in nb.cells
+        if not (cell.cell_type == "code" and _LEGACY_COMBINE_MARKER in cell.source)
     ]
-    nb.cells.append(nbformat.v4.new_code_cell(build_combine_cell()))
-    return nb
 
 
 def generate_bibliography(

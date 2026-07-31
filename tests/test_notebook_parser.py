@@ -161,3 +161,94 @@ def test_parse_magic_notebook_extracts_imports_despite_magic():
     libs = parse_notebook(MAGIC_NB)
     for expected in ("numpy", "pandas", "pyleoclim", "scipy"):
         assert expected in libs, f"expected '{expected}' in libraries but got {libs}"
+
+
+# --- injected cells are not the notebook's dependencies -----------------------
+
+def test_is_generated_cell_recognizes_marker_and_legacy_signatures():
+    from notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
+
+    assert is_generated_cell(f"{PROVENANCE_CELL_MARKER}\nimport bibliography")
+    assert is_generated_cell("_provbib_software = collect_library_entries([], None)")
+    assert is_generated_cell("_provbib_data_D = _meta_D")
+    assert is_generated_cell("# provenance-combine-cell\nimport pandas as pd")
+    assert not is_generated_cell("import numpy as np\nx = np.array([1])")
+
+
+def test_parse_notebook_ignores_injected_cells(tmp_path):
+    """The software cell imports bibliography; a retrieval cell imports pylipd.
+
+    Scanning them would cite the tool's own machinery, and pylipd has a
+    citation on file, so the notebook would gain a citation it never earned.
+    """
+    import nbformat
+    from notebook_parser import parse_notebook
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "from bibliography import collect_library_entries\n"
+        "_provbib_software = collect_library_entries(['numpy'], None)"
+    ))
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "from pylipd.lipd import LiPD\n"
+        "_lipd_df = LiPD()\n"
+        "_provbib_data_df = _meta_df"
+    ))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    assert parse_notebook(str(path)) == ["numpy"]
+
+
+def test_read_notebook_code_ignores_injected_cells(tmp_path):
+    """The detector must not mistake retrieval scaffolding for a dataset variable."""
+    import nbformat
+    from notebook_parser import read_notebook_code
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("df_res = pd.read_csv(data)"))
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "from pylipd.lipd import LiPD\n"
+        "_lipd_df_res = LiPD()\n"
+        "_provbib_data_df_res = _meta_df_res"
+    ))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    code = read_notebook_code(str(path))
+    assert "df_res = pd.read_csv(data)" in code
+    assert "_lipd_df_res" not in code
+
+
+def test_injected_cells_carry_the_marker():
+    """New cells are recognized by the marker, not by inferring their contents."""
+    from notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
+    from software_workflow import build_metadata_cell
+    from data_workflow import build_dataset_cell
+
+    software = build_metadata_cell(["numpy"])
+    # The marker belongs on the injected cell, not on build_retrieval_cell's
+    # fragment, which never becomes a cell of its own.
+    data = build_dataset_cell([["D", "PyLiPD"]])
+    assert software.startswith(PROVENANCE_CELL_MARKER)
+    assert data.startswith(PROVENANCE_CELL_MARKER)
+    assert is_generated_cell(software) and is_generated_cell(data)
+
+
+def test_repeated_software_runs_do_not_accumulate_self_citations(tmp_path):
+    import nbformat
+    from software_workflow import generate_software_workflow
+
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    first = generate_software_workflow(str(path))
+    second = generate_software_workflow(str(path))
+    assert first == second == ["numpy"]
+    assert "bibliography" not in second

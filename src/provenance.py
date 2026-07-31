@@ -42,10 +42,10 @@ Design decisions:
       VSCode notebooks - the primary environment for this project. Auto-detect
       stays the default; the override is the recovery path.
     - Neither tool's citations exist yet when it returns: both inject cells whose
-      OUTPUT is the citation (cite_data a retrieval cell per dataset, cite_software
-      a single metadata-DataFrame cell). So each summary reports what was injected
-      and tells the user to run the cells, rather than implying citations were
-      produced.
+      OUTPUT is the citation (cite_data a retrieval cell that displays each
+      metadata frame, cite_software a single metadata-DataFrame cell). So each
+      summary reports what was injected and tells the user to run the cells,
+      rather than implying citations were produced.
     - Every workflow reads the .ipynb from disk, so unsaved cells are invisible.
       Empty results say so instead of being reported as the answer.
 """
@@ -146,10 +146,12 @@ def _format_result(call: dict) -> str:
         if not result:
             return f"No datasets detected in {notebook}.\n{_DISK_NOTE}"
         lines = "\n".join(f"  - {variable} ({tool})" for variable, tool in result)
+        noun = "dataset" if len(result) == 1 else "datasets"
         return (
-            f"Injected {len(result)} retrieval cell(s) into {notebook}:\n"
+            f"Injected a dataset cell into {notebook} for {len(result)} {noun}:\n"
             f"{lines}\n\n"
-            "Reload the notebook and run the new cells to produce the citations."
+            "Reload the notebook and run the new cell to perform the retrieval; "
+            "its _bib_ and _meta_ results remain available in the kernel."
         )
 
     if call["name"] == "cite_software":
@@ -160,8 +162,8 @@ def _format_result(call: dict) -> str:
         return (
             f"Injected a metadata cell into {notebook} for {len(result)} {noun}:\n"
             f"{lines}\n\n"
-            "Reload the notebook and run the new cell to see the citation "
-            "metadata DataFrame."
+            "Reload the notebook and run the new cell to see the "
+            "provenance_software DataFrame."
         )
 
     if not str(result).strip():
@@ -201,11 +203,12 @@ def _format_results(result: dict | list[dict]) -> str:
     if not rendered:
         return _NO_ROUTE
 
+    # Keyed on the cells being present, not on the notebook having changed: a
+    # re-run with unchanged inputs rewrites identical cells and mutates nothing,
+    # which is a success, not an unconfirmed layout.
     status = (
-        "Static verification passed: the injected cells are present and the "
-        "combined bibliography cell is last."
-        if verification.get("combine_cell_present")
-        and verification.get("combine_cell_last")
+        "Static verification passed: the injected cells are present."
+        if verification.get("present")
         else "Static verification could not confirm the final notebook layout."
     )
     if verification.get("runtime_unverified"):

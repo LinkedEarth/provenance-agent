@@ -2,10 +2,10 @@
 Unit tests for bibliography.py's collect_library_entries(). Uses real
 Citations/ data (pyleoclim has both a paper and a software citation) plus
 a monkeypatched citation index for the DOI-dedup case. Also covers
-render_bibtex_strings_to_df as a standalone BibTeX utility and the combine-cell
-builder/injector (build_combine_cell, ensure_combine_cell). The injected data
+render_bibtex_strings_to_df as a standalone BibTeX utility. The injected data
 workflow uses source metadata directly; the software schema also includes a
-note row for imported libraries without citations.
+note row for imported libraries without citations, except for standard-library
+imports, which are dropped entirely.
 """
 
 import os
@@ -17,9 +17,7 @@ import nbformat
 
 import bibliography
 from bibliography import (
-    build_combine_cell,
     collect_library_entries,
-    ensure_combine_cell,
     render_bibtex_strings_to_df,
 )
 
@@ -168,81 +166,29 @@ def test_strings_to_df_empty_input_is_empty_framed():
     assert list(df.columns) == EXPECTED_COLUMNS
 
 
-def test_combine_cell_source_scans_and_concats():
-    src = build_combine_cell()
-    assert "# provenance-combine-cell" in src
-    assert "_provbib_" in src
-    assert "provenance_bibliography" in src
-    assert "pd.concat" in src
-    assert "display(provenance_bibliography)" in src
+# --- standard-library imports ------------------------------------------------
+
+def test_is_stdlib_recognizes_interpreter_modules():
+    assert bibliography.is_stdlib("sys")
+    assert bibliography.is_stdlib("json")
+    assert bibliography.is_stdlib("PATHLIB")  # case-insensitive
+    assert not bibliography.is_stdlib("numpy")
 
 
-def test_combine_cell_preserves_union_of_software_and_metadata_columns():
-    import pandas as pd
-
-    software = pd.DataFrame([{
-        "library": "pandas",
-        "citation_type": "software",
-        "key": "pandas-key",
-        "title": "Pandas",
-        "author": "A. Author",
-        "year": "2020",
-        "doi": "10.1/software",
-        "bibtex": "@software{pandas-key}",
-    }])
-    metadata = pd.DataFrame([{
-        "dsname": "SP13CHPE",
-        "title": "Dataset",
-        "authors": "H Cheng",
-        "doi": "10.1/dataset",
-        "pubyear": 2013.0,
-        "journal": "Nature",
-    }])
-    namespace = {
-        "pd": pd,
-        "_provbib_software": software,
-        "_provbib_data_filtered_df2": metadata,
-        "display": lambda value: None,
-    }
-
-    exec(build_combine_cell(), namespace)
-    combined = namespace["provenance_bibliography"]
-
-    assert set(software.columns).issubset(combined.columns)
-    assert set(metadata.columns).issubset(combined.columns)
-    assert len(combined) == 2
-    software_row = combined[combined["library"].notna()].iloc[0]
-    metadata_row = combined[combined["library"].isna()].iloc[0]
-    assert pd.isna(software_row["journal"])
-    assert pd.isna(metadata_row["library"])
+def test_stdlib_produces_no_rows():
+    df = collect_library_entries(["sys", "os", "json", "io", "ast", "pathlib"])
+    assert df.empty
+    assert list(df.columns) == EXPECTED_COLUMNS
 
 
-def test_ensure_appends_one_combine_cell():
-    nb = nbformat.v4.new_notebook()
-    nb.cells.append(nbformat.v4.new_code_cell("import pandas as pd"))
-    ensure_combine_cell(nb)
-    marked = [c for c in nb.cells if "# provenance-combine-cell" in c.source]
-    assert len(marked) == 1
-    assert nb.cells[-1] is marked[0]
+def test_stdlib_dropped_but_uncited_third_party_still_noted():
+    df = collect_library_entries(["sys", "definitely_not_a_real_library"])
+    assert list(df["library"]) == ["definitely_not_a_real_library"]
+    assert df.iloc[0]["note"] == "No citation found for imported library"
 
 
-def test_ensure_is_idempotent_and_keeps_it_last():
-    nb = nbformat.v4.new_notebook()
-    ensure_combine_cell(nb)
-    nb.cells.append(nbformat.v4.new_code_cell("_provbib_data_D = ..."))
-    ensure_combine_cell(nb)
-    marked = [c for c in nb.cells if "# provenance-combine-cell" in c.source]
-    assert len(marked) == 1
-    assert nb.cells[-1] is marked[0]
+def test_stdlib_does_not_crowd_out_real_citations():
+    df = collect_library_entries(["sys", "pyleoclim", "pathlib"])
+    assert set(df["library"]) == {"pyleoclim"}
 
 
-def test_ensure_survives_write_read_roundtrip(tmp_path):
-    nb = nbformat.v4.new_notebook()
-    ensure_combine_cell(nb)
-    path = tmp_path / "nb.ipynb"
-    with open(path, "w") as f:
-        nbformat.write(nb, f)
-    nb2 = nbformat.read(str(path), as_version=4)
-    ensure_combine_cell(nb2)
-    marked = [c for c in nb2.cells if "# provenance-combine-cell" in c.source]
-    assert len(marked) == 1

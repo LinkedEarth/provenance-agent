@@ -2,15 +2,15 @@
 test_dataset_detection.py
 
 Purpose:
-    Unit tests for the pure logic in dataset_detection.py: building the LLM
-    detection prompt (build_detection_prompt) and parsing the model's reply into
-    [variable, tool] pairs (parse_detection_response).
+    Unit tests for the pure legacy helpers in dataset_detection.py: building the
+    old LLM detection prompt (build_detection_prompt), parsing model replies into
+    [variable, tool] pairs (parse_detection_response), and exercising the active
+    deterministic notebook-path entry point.
 
 Implementation:
-    These tests operate on plain strings with no network or LLM calls, so they
-    run fast and deterministically. The live Gemini call in detect_datasets is
-    exercised manually against a real notebook (it hits an external, non-
-    deterministic service), so it is intentionally not covered here.
+    The legacy prompt/parser tests operate on plain strings. The active
+    detect_datasets test writes a small notebook and verifies deterministic
+    source-to-analysis tracing without network or LLM calls.
 
 Design Decisions:
     - parse_detection_response must tolerate the ways an LLM wraps JSON: bare
@@ -23,11 +23,16 @@ Design Decisions:
 import os
 import sys
 
+import nbformat
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from dataset_detection import build_detection_prompt, parse_detection_response
+from dataset_detection import (
+    build_detection_prompt,
+    detect_datasets,
+    parse_detection_response,
+)
 
 
 # --- parse_detection_response ------------------------------------------------
@@ -75,3 +80,35 @@ def test_prompt_embeds_notebook_code():
 def test_prompt_includes_output_format_instruction():
     prompt = build_detection_prompt("x = 1")
     assert "JSON list of [variable, tool] pairs" in prompt
+
+
+def test_detect_datasets_uses_deterministic_notebook_path(tmp_path):
+    notebook = tmp_path / "analysis.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "import io\n"
+        "import pandas as pd\n"
+        "import requests\n"
+        "url = 'https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic'\n"
+        "response = requests.post(url, data={'query': 'SELECT ...'})\n"
+        "df_res = pd.read_csv(io.StringIO(response.text))\n"
+        "filtered_df2 = df_res[df_res['varID'].notna()]\n"
+        "filtered_df2.pca()\n"
+    )])
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    assert detect_datasets(str(notebook)) == [["filtered_df2", "LiPDGraph"]]
+
+
+def test_detect_datasets_warns_for_analysis_without_source_lineage(tmp_path):
+    notebook = tmp_path / "unknown_loader.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "import custom_loader\n"
+        "df = custom_loader.load_data('remote://example')\n"
+        "result = df.pca()\n"
+    )])
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    with pytest.warns(UserWarning, match="unsupported loader"):
+        assert detect_datasets(str(notebook)) == []

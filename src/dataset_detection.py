@@ -1,36 +1,33 @@
 """
-LLM-based dataset detection for the data workflow.
+Dataset detection facade for the data workflow.
 
 Purpose:
     Identify which notebook variables hold the datasets actually used for
     analysis, so the data workflow can inject a retrieval cell ({var}.{method})
-    for each. Detection is done by an LLM (Gemini via LangChain), NOT by AST
-    parsing, because tracing data flow to the *terminal* analysis variable
-    across many cells is far more robust with an LLM than with static analysis.
+    for each. The active detector is the deterministic, AST/data-flow analyzer
+    in deterministic_dataset_detection.py.
 
 Implementation:
-    - DETECTION_PROMPT: the prompt template, kept verbatim as the single source
-      of truth (it mirrors the "Dataset detection prompt" documented in
-      CLAUDE.md). The notebook code is spliced in at the "{code}" marker.
-    - build_detection_prompt(code): fills the template with the notebook code.
-    - parse_detection_response(text): extracts the JSON [variable, tool] list
-      from the model's reply, tolerating markdown code fences and surrounding
-      prose, and returns [] on anything unparseable.
-    - detect_datasets(code): thin wrapper that invokes the Gemini chat model and
-      returns the parsed pairs.
-    - detect_datasets_in_notebook(path): reads a .ipynb into code, then detects.
+    - detect_datasets(notebook_path): delegates to the deterministic detector
+      and returns the existing [variable, tool] pair contract.
+    - DETECTION_PROMPT, build_detection_prompt(), and
+      parse_detection_response() remain as legacy LLM helpers for compatibility
+      and reference; they are no longer used by active detection.
 
 Design decisions:
-    - Reuses the Gemini model configured in src/llm.py (temperature=0) so
-      detection is as deterministic as the API allows and the
-      credential/config lives in one place. That import is deferred into
-      detect_datasets() so the pure helpers can be imported and unit-tested
-      without a GOOGLE_API_KEY or network access.
+    - The public active detector accepts a notebook path so the static analyzer
+      can preserve notebook cell boundaries and ignore generated cells.
+    - The former LLM implementation is commented out inside detect_datasets()
+      rather than deleted, making the transition easy to inspect or reverse.
+    - detect_datasets() preserves its list return contract while emitting
+      UserWarning messages for unresolved analysis source lineage. Callers that
+      need structured diagnostics can use detect_datasets_with_diagnostics().
     - The prompt is spliced with str.replace("{code}", ...) rather than
       str.format() so notebook code containing braces can never break templating.
 """
 
 import json
+import warnings
 
 
 DETECTION_PROMPT = """Analyze a Jupyter notebook to identify which dataset source variables are actually used for
@@ -114,36 +111,53 @@ def parse_detection_response(text: str) -> list[list[str]]:
     return []
 
 
-def detect_datasets(code: str) -> list[list[str]]:
+def detect_datasets(notebook_path: str) -> list[list[str]]:
     """
-    Detects dataset source variables in notebook code via the Gemini LLM.
+    Detects analysis-used dataset sources in a notebook deterministically.
 
     Args:
-        code: the notebook's Python source (all code cells concatenated)
+        notebook_path: path to the target .ipynb file
 
     Returns:
-        list of [variable, tool] pairs identifying the terminal variables that
-        hold the datasets used for analysis
+        deterministic list of [variable, tool] pairs
     """
-    from llm import llm, message_text
+    # Legacy LLM implementation, retained for reference during the transition:
+    # from llm import llm, message_text
+    # response = llm.invoke(build_detection_prompt(code))
+    # return parse_detection_response(message_text(response))
 
-    response = llm.invoke(build_detection_prompt(code))
-    return parse_detection_response(message_text(response))
+    diagnostics = detect_datasets_with_diagnostics(notebook_path)
+    for message in diagnostics["warnings"]:
+        warnings.warn(message, UserWarning, stacklevel=2)
+    return diagnostics["pairs"]
+
+
+def detect_datasets_with_diagnostics(notebook_path: str) -> dict[str, list]:
+    """
+    Detects dataset pairs and returns unresolved-analysis diagnostics.
+
+    Args:
+        notebook_path: path to the target .ipynb file
+
+    Returns:
+        a mapping with ``pairs`` and ``warnings`` keys
+    """
+    from deterministic_dataset_detection import detect_datasets_with_diagnostics
+
+    return detect_datasets_with_diagnostics(notebook_path)
 
 
 def detect_datasets_in_notebook(path: str) -> list[list[str]]:
     """
-    Reads a notebook file and detects its dataset source variables.
+    Compatibility alias for detect_datasets().
 
     Args:
-        path: path to a .ipynb file
+        path: path to the target .ipynb file
 
     Returns:
-        list of [variable, tool] pairs (see detect_datasets)
+        deterministic list of [variable, tool] pairs
     """
-    from notebook_parser import read_notebook_code
-
-    return detect_datasets(read_notebook_code(path))
+    return detect_datasets(path)
 
 
 if __name__ == "__main__":

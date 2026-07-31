@@ -5,8 +5,8 @@ and extracts the Python libraries they import.
 Purpose:
     The software workflow needs the set of imported libraries so it can look up
     their citations. This module does that extraction with `ast`, plus it
-    provides `read_notebook_code()`, the raw-code reader shared with the LLM
-    dataset detector (dataset_detection.py).
+    provides `read_notebook_code()`, the raw-code reader used by the data
+    workflow for code-oriented checks such as endpoint extraction.
 
 Implementation:
     - strip_ipython_directives(code): removes magics (`%`, `%%`) and shell
@@ -19,15 +19,23 @@ Implementation:
     - parse_notebook(path): reads a notebook and returns its sorted list of
       imported library names.
     - read_notebook_code(path): returns all code cells concatenated (directives
-      stripped) - the full source the LLM detector reasons over.
+      stripped) for code-oriented workflow checks.
     - validate_libraries(requested, available): case-insensitive membership
       check used by the "cite one specific library" mode.
+    - is_generated_cell(source): True for cells this tool injected. Both scans
+      above skip them.
 
 Design decisions:
-    - Detection of *datasets* is NOT done here. It is done by an LLM in
-      dataset_detection.py, because tracing data flow to the terminal analysis
-      variable across many cells is far more robust with an LLM than with static
-      AST analysis. This module is purely the software (import) side.
+    - Injected cells are excluded from both scans. They carry imports of their
+      own (the software cell imports bibliography, a LiPDGraph retrieval cell
+      imports pylipd), which are the tool's machinery rather than the notebook's
+      dependencies - and since pylipd has a citation on file, scanning them made
+      a second run cite a library the notebook never used. New cells carry
+      PROVENANCE_CELL_MARKER; the legacy signatures are matched too so notebooks
+      written by earlier versions need no re-run.
+    - Detection of *datasets* is NOT done here. It is delegated to the
+      deterministic detector exposed by dataset_detection.py. This module is
+      otherwise purely the software (import) side.
 """
 
 import ast
@@ -43,6 +51,39 @@ _NON_PYTHON_CELL_MAGICS = frozenset({
     "perl", "ruby",
     "writefile",
 })
+
+
+PROVENANCE_CELL_MARKER = "# provenance-agent-generated"
+
+# Signatures of cells injected before PROVENANCE_CELL_MARKER existed, so a
+# notebook written by an older version is still recognized without re-running.
+_LEGACY_GENERATED_SIGNATURES = (
+    "_provbib_software",
+    "_provbib_data_",
+    "# provenance-combine-cell",
+)
+
+
+def is_generated_cell(source: str) -> bool:
+    """
+    Reports whether a cell was injected by this tool rather than written by the user.
+
+    The injected cells carry imports of their own - the software cell imports
+    bibliography, a LiPDGraph retrieval cell imports pylipd - and those are the
+    tool's own machinery, not the notebook's dependencies. Scanning them would
+    make a second run cite bibliography and pylipd, and pylipd has a citation on
+    file, so the notebook would gain a citation for a library it never used.
+
+    Args:
+        source: a notebook cell's source text
+
+    Returns:
+        True if the cell was injected by a provenance workflow
+    """
+    return (
+        PROVENANCE_CELL_MARKER in source
+        or any(sig in source for sig in _LEGACY_GENERATED_SIGNATURES)
+    )
 
 
 def strip_ipython_directives(code: str) -> str:
@@ -157,11 +198,15 @@ def read_notebook_code(path: str) -> str:
     """
     Reads a .ipynb file and returns all code cells concatenated into one string,
     with IPython directives (magics, shell lines) stripped so the result is
-    valid Python. Used by the LLM dataset detector, which reasons over the full
-    notebook source.
+    valid Python. Used by code-oriented workflow checks such as endpoint
+    extraction.
 
     Args:
         path: path to a .ipynb file
+
+    Cells this tool injected are skipped, so the detector never sees the
+    retrieval scaffolding (_lipd_x = LiPD(), _meta_x = ...) and mistake it for
+    one of the notebook's own dataset variables.
 
     Returns:
         the notebook's code cells joined by newlines, directives removed
@@ -171,7 +216,7 @@ def read_notebook_code(path: str) -> str:
     return "\n".join(
         strip_ipython_directives(cell.source)
         for cell in nb.cells
-        if cell.cell_type == "code"
+        if cell.cell_type == "code" and not is_generated_cell(cell.source)
     )
 
 
@@ -201,7 +246,7 @@ def parse_notebook(path: str | None = None) -> list[str]:
 
     libraries = set()
     for cell in nb.cells:
-        if cell.cell_type == "code":
+        if cell.cell_type == "code" and not is_generated_cell(cell.source):
             libraries |= extract_libraries(cell.source)
 
     return sorted(libraries)

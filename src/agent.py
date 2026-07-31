@@ -23,8 +23,10 @@ Design decisions:
       so dispatch never guesses a target's category after classification.
     - An unclear request, missing requested software import, or data request
       with no detected data variables returns a warning and does not mutate the
-      notebook. An unknown dataSetName is allowed when data variables exist,
-      because the name can only be confirmed after the injected cell runs.
+      notebook. An unmatched target is allowed for PyLiPD/LiPDGraph data-name
+      loading, but a specific PyleoTUPS study-name request warns and does not
+      dispatch or mutate the notebook because its available names are only
+      known inside the live provider object.
     - The existing StructuredTool wrappers remain public for direct callers,
       but they are not bound to the classification model.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
@@ -51,6 +53,7 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, Field
 
 from llm import llm
+from notebook_parser import PROVENANCE_CELL_MARKER
 from orchestrator import (
     cite_data,
     cite_data_tool,
@@ -83,7 +86,8 @@ SYSTEM_PROMPT = (
     "Classify a provenance request for a Jupyter notebook. The request can "
     "concern software, data, both, or be unclear.\n\n"
     "Software means an imported Python library. Data means a dataset or "
-    "dataset variable.\n\n"
+    "study identified by its dataset name or ID; notebook variable names are "
+    "not data targets.\n\n"
     "The notebook path is `{notebook_path}`.\n\n"
     "For 'cite everything', return action 'cite', scope 'all', and kinds "
     "['software', 'data']. For software-only or data-only requests, return "
@@ -144,11 +148,10 @@ def _prepare_context(state: dict) -> dict:
 
 
 def _detect_dataset_pairs(notebook_path: str) -> list[list[str]]:
-    """Runs the existing dataset detector for a data-bearing request."""
+    """Runs the deterministic dataset detector for a data-bearing request."""
     from dataset_detection import detect_datasets
-    from notebook_parser import read_notebook_code
 
-    return detect_datasets(read_notebook_code(notebook_path))
+    return detect_datasets(notebook_path)
 
 
 def _warning_state(state: dict, message: str) -> dict:
@@ -216,11 +219,16 @@ def _resolve_targets(state: dict) -> dict:
         detected_pairs = _detect_dataset_pairs(state["notebook_path"])
         if not detected_pairs:
             return _warning_state(state, "No datasets were detected in the notebook.")
+        from data_workflow import pyleotups_target_warning
+
+        target_warning = pyleotups_target_warning(
+            detected_pairs,
+            data_targets,
+        )
+        if target_warning:
+            return _warning_state(state, target_warning)
         if data_targets is not None:
-            detected_variables = {pair[0].casefold() for pair in detected_pairs}
-            runtime_unverified = any(
-                target.casefold() not in detected_variables for target in data_targets
-            )
+            runtime_unverified = bool(data_targets)
 
     return {
         **state,
@@ -290,12 +298,12 @@ def _new_cells(before: Counter, notebook) -> list:
 
 
 def _cell_tool(source: str) -> str:
-    """Classifies an injected cell by its stable source conventions."""
-    if "# provenance-combine-cell" in source:
-        return "combine"
-    if "_provbib_software" in source:
+    """Classifies an injected cell by its software/data marker."""
+    if "provenance_software" in source:
         return "software"
-    if "_provbib_data_" in source:
+    if "provenance_datasets" in source:
+        return "data"
+    if PROVENANCE_CELL_MARKER in source:
         return "data"
     return "unknown"
 
@@ -306,19 +314,10 @@ def _verify(state: dict) -> dict:
     with open(notebook_path) as handle:
         notebook = nbformat.read(handle, as_version=4)
 
-    combine_indexes = [
-        index for index, cell in enumerate(notebook.cells)
-        if "# provenance-combine-cell" in cell.source
-    ]
-    combine_present = bool(combine_indexes)
-    combine_last = combine_present and combine_indexes[-1] == len(notebook.cells) - 1
-
     if state.get("status") == "warning":
         mutated = _snapshot_cells(notebook_path) != state["before_snapshot"]
         verification = {
             "cells": [],
-            "combine_cell_present": combine_present,
-            "combine_cell_last": combine_last,
             "mutated": mutated,
             "runtime_unverified": False,
         }
@@ -340,27 +339,25 @@ def _verify(state: dict) -> dict:
         expected.append("software")
     if state["resolved"]["data_requested"]:
         expected.append("data")
-    actual = {summary["tool"] for summary in summaries}
-    missing = [tool for tool in expected if tool not in actual]
+    # Presence in the final notebook, not newness. A re-run whose inputs have
+    # not changed rewrites a byte-identical cell, so the added-cell diff is
+    # empty even though the notebook is exactly as it should be.
+    present = {_cell_tool(cell.source) for cell in notebook.cells}
+    missing = [tool for tool in expected if tool not in present]
     verification = {
         "cells": summaries,
-        "combine_cell_present": combine_present,
-        "combine_cell_last": combine_last,
+        "present": sorted(tool for tool in present if tool != "unknown"),
         "mutated": bool(added),
         "runtime_unverified": state["resolved"]["runtime_unverified"],
     }
-    if missing or not combine_present or not combine_last:
-        message = []
-        if missing:
-            message.append("missing injected " + ", ".join(missing) + " cell")
-        if not combine_present:
-            message.append("combine cell is absent")
-        elif not combine_last:
-            message.append("combine cell is not last")
+    if missing:
         state = {
             **state,
             "status": "warning",
-            "warning": "Verification failed: " + "; ".join(message),
+            "warning": (
+                "Verification failed: missing injected "
+                + ", ".join(missing) + " cell"
+            ),
         }
     return _public_result(state, verification)
 
@@ -415,8 +412,6 @@ def _parser_warning_envelope(message: str) -> dict:
         "dispatch": [],
         "verification": {
             "cells": [],
-            "combine_cell_present": False,
-            "combine_cell_last": False,
             "mutated": False,
             "runtime_unverified": False,
         },

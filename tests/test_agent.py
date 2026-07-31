@@ -50,6 +50,14 @@ def test_tools_by_name_has_both():
     assert set(agent._TOOLS_BY_NAME) == {"cite_software", "cite_data"}
 
 
+def test_generated_retrieval_cell_is_classified_as_data_without_frame_binding():
+    source = (
+        "# provenance-agent-generated\n"
+        "_bib_D, _meta_D = D.get_bibtex(remote=True)\n"
+    )
+    assert agent._cell_tool(source) == "data"
+
+
 def _fake_model(decision):
     return RunnableLambda(
         lambda _prompt: AIMessage(content=json.dumps(decision))
@@ -87,8 +95,8 @@ def test_chain_parses_typed_software_target_and_verifies_injection(tmp_path):
         {"kind": "software", "name": "pyleoclim"}
     ]
     assert result["dispatch"][0]["name"] == "cite_software"
-    assert result["verification"]["combine_cell_present"] is True
-    assert result["verification"]["combine_cell_last"] is True
+    assert result["verification"]["mutated"] is True
+    assert [c["tool"] for c in result["verification"]["cells"]] == ["software"]
 
 
 def test_ambiguous_classification_returns_warning_without_mutation(tmp_path):
@@ -158,6 +166,34 @@ def test_data_without_detected_pairs_warns_without_mutation(tmp_path, monkeypatc
     assert notebook.read_bytes() == before
 
 
+def test_specific_pyleotups_study_warns_without_mutation(tmp_path, monkeypatch):
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    before = notebook.read_bytes()
+    monkeypatch.setattr(
+        agent,
+        "_detect_dataset_pairs",
+        lambda _path: [["ds", "PyleoTUPS"]],
+    )
+    decision = {
+        "action": "cite",
+        "scope": "selected",
+        "targets": [{"kind": "data", "name": "TR04EVLI"}],
+        "fmt": "bibtex",
+    }
+
+    result = agent.build_chain(_fake_model(decision)).invoke({
+        "request": "cite TR04EVLI",
+        "notebook_path": str(notebook),
+    })
+
+    assert result["status"] == "warning"
+    assert "PyleoTUPS" in result["warning"]
+    assert "cite all" in result["warning"]
+    assert result["dispatch"] == []
+    assert notebook.read_bytes() == before
+
+
 def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatch):
     notebook = tmp_path / "sample.ipynb"
     shutil.copyfile(SAMPLE, notebook)
@@ -173,19 +209,17 @@ def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatc
         with open(path) as handle:
             current = nbformat.read(handle, as_version=4)
         current.cells.append(nbformat.v4.new_code_cell(source))
-        from bibliography import ensure_combine_cell
-        ensure_combine_cell(current)
         with open(path, "w") as handle:
             nbformat.write(current, handle)
 
     def fake_software(path, libraries=None):
         dispatch_calls.append(("software", libraries))
-        append_segment(path, "_provbib_software = software_frame")
+        append_segment(path, "provenance_software = software_frame")
         return ["pyleoclim"]
 
     def fake_data(path, targets=None, fmt="apa", detected_pairs=None):
         dispatch_calls.append(("data", targets, fmt, detected_pairs))
-        append_segment(path, "_provbib_data_filtered_df2 = data_frame")
+        append_segment(path, "provenance_datasets = data_frame")
         return detected_pairs
 
     monkeypatch.setattr(agent, "_detect_dataset_pairs", fake_detect)
@@ -213,9 +247,9 @@ def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatc
         "cite_software", "cite_data"
     ]
     assert result["status"] == "ok"
-    assert result["verification"]["combine_cell_last"] is True
+    assert result["verification"]["mutated"] is True
     assert {cell["tool"] for cell in result["verification"]["cells"]} == {
-        "software", "data", "combine"
+        "software", "data"
     }
 
 
@@ -232,3 +266,30 @@ def test_run_returns_the_chain_envelope(monkeypatch):
         RunnableLambda(lambda _input: expected),
     )
     assert agent.run("whatever", SAMPLE) == expected
+
+
+def test_rerun_with_unchanged_inputs_still_verifies(tmp_path, monkeypatch):
+    """Re-running rewrites byte-identical cells, so no cell is *added*.
+
+    Verification has to key on the cells being present in the final notebook,
+    not on the added-cell diff, or an idempotent second run reports its own
+    output missing.
+    """
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+    chain = agent.build_chain(_fake_model(decision))
+
+    first = chain.invoke({"request": "cite the software", "notebook_path": str(notebook)})
+    second = chain.invoke({"request": "cite the software", "notebook_path": str(notebook)})
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok", second.get("warning")
+    assert second["verification"]["mutated"] is False   # nothing changed
+    assert "software" in second["verification"]["present"]

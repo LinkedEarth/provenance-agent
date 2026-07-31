@@ -17,10 +17,10 @@ Implementation:
 
 Design Decisions:
     - The injected cell imports collect_library_entries rather than baking BibTeX
-      inline, and binds the result to _provbib_software with no display() call
-      (the combine cell displays the final concatenated frame instead), so the
-      tests assert on that import, the _provbib_software binding, and the
-      absence of display().
+      inline, binds the result to provenance_software and display()s it, so the
+      tests assert on that import, the binding, and the display call. There is
+      no combine cell: each workflow owns exactly one self-displaying cell, and
+      a re-run replaces its own cell rather than appending a second.
     - generate_software_workflow returns the libraries it built a cell for, so a
       filter that matches nothing returns [] and leaves the notebook untouched.
 """
@@ -59,10 +59,10 @@ def test_cell_passes_citation_types_filter():
     assert "['pyleoclim'], ['software']" in cell
 
 
-def test_cell_binds_provbib_software_and_has_no_display():
+def test_cell_binds_and_displays_provenance_software():
     cell = build_metadata_cell(["pyleoclim"])
-    assert "_provbib_software = collect_library_entries(['pyleoclim'], None)" in cell
-    assert "display(" not in cell
+    assert "provenance_software = collect_library_entries(['pyleoclim'], None)" in cell
+    assert "display(provenance_software)" in cell
 
 
 # --- inject_metadata_cell ----------------------------------------------------
@@ -84,7 +84,8 @@ def test_generate_all_libraries_injects_and_returns_them(tmp_path):
     assert "pyleoclim" in wanted
 
     nb = nbformat.read(str(out), as_version=4)
-    assert "# provenance-combine-cell" in nb.cells[-1].source
+    assert "# provenance-combine-cell" not in "".join(c.source for c in nb.cells)
+    assert "display(provenance_software)" in nb.cells[-1].source
     assert any("collect_library_entries(" in c.source for c in nb.cells)
 
 
@@ -111,3 +112,38 @@ def test_generate_does_not_mutate_the_source_notebook(tmp_path):
     generate_software_workflow(SAMPLE, output_path=str(tmp_path / "out.ipynb"))
     after = nbformat.read(SAMPLE, as_version=4)
     assert len(after.cells) == len(before.cells)
+
+
+def test_generate_excludes_stdlib_from_cell_and_result(tmp_path):
+    """A notebook importing sys/json must not cite them as dependencies."""
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell(
+        "import sys\nimport json\nimport pathlib\nimport numpy as np"
+    ))
+    source = tmp_path / "in.ipynb"
+    with open(source, "w") as f:
+        nbformat.write(nb, f)
+
+    wanted = generate_software_workflow(str(source))
+
+    assert wanted == ["numpy"]
+    written = nbformat.read(str(source), as_version=4)
+    metadata_cell = next(c for c in written.cells if "provenance_software" in c.source)
+    for stdlib_name in ("'sys'", "'json'", "'pathlib'"):
+        assert stdlib_name not in metadata_cell.source
+
+
+def test_repeated_runs_replace_the_software_cell(tmp_path):
+    """One software cell means one, however many times the workflow runs."""
+    nb = nbformat.v4.new_notebook()
+    nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))
+    path = tmp_path / "nb.ipynb"
+    with open(path, "w") as f:
+        nbformat.write(nb, f)
+
+    for _ in range(3):
+        generate_software_workflow(str(path))
+
+    written = nbformat.read(str(path), as_version=4)
+    assert sum("provenance_software" in c.source for c in written.cells) == 1
+    assert len(written.cells) == 2  # the original cell plus one injected
