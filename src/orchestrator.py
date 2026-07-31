@@ -28,20 +28,15 @@ Design decisions:
       output, so their contracts are symmetric: each returns what it injected a
       cell for (cite_software -> library names, cite_data -> [variable, tool]
       pairs), never the citation text itself.
-    - fmt applies only to cite_data and remains a compatibility argument.
-      cite_software has no fmt argument.
+    - fmt applies only to cite_data and is accepted but ignored. APA rendering
+      was removed, so there is no second output format to select and no value to
+      reject: "bibtex", "apa", and any other string all take the same path. The
+      parameter is kept so callers, the agent's RouteDecision, and the tool
+      schema stay stable for a future non-LLM APA implementation.
     - Workflow modules (software_workflow, data_workflow) are deferred into the
       functions so importing this module stays cheap. LangChain StructuredTool is
       imported at module level to build the tool instances at import time.
 """
-
-_VALID_FMT = ("apa", "bibtex")
-
-
-def _check_fmt(fmt: str) -> None:
-    """Raises ValueError unless fmt is 'apa' or 'bibtex'."""
-    if fmt not in _VALID_FMT:
-        raise ValueError(f"fmt must be one of {_VALID_FMT}, got {fmt!r}")
 
 
 def cite_software(
@@ -82,7 +77,7 @@ def cite_software(
 def cite_data(
     notebook_path: str,
     targets: str | list[str] | None = None,
-    fmt: str = "apa",
+    fmt: str = "bibtex",
     output_path: str | None = None,
     detected_pairs: list[list[str]] | None = None,
 ) -> list[list[str]]:
@@ -100,7 +95,9 @@ def cite_data(
         targets: None (all detected datasets), a dataset name or study ID, or
             a list. Specific PyleoTUPS study targets are unsupported and return
             a warning without changing the notebook.
-        fmt: "apa" (default) or "bibtex"
+        fmt: accepted and ignored. Any string is allowed; the injected cell is
+            the same either way. Kept for compatibility with existing callers
+            and for a future non-LLM APA implementation.
         output_path: where to write the modified notebook (defaults to in place)
         detected_pairs: optional precomputed detector result used internally by
             the LCEL pipeline; normal callers should leave it as None
@@ -108,7 +105,6 @@ def cite_data(
     Returns:
         the [variable, tool] pairs that had retrieval cells injected
     """
-    _check_fmt(fmt)
     from data_workflow import generate_data_workflow
 
     return generate_data_workflow(
@@ -139,7 +135,7 @@ cite_software_tool = StructuredTool.from_function(
 def _cite_data_tool_entry(
     notebook_path: str,
     targets: str | list[str] | None = None,
-    fmt: str = "apa",
+    fmt: str = "bibtex",
     output_path: str | None = None,
 ) -> list[list[str]]:
     """Exposes cite_data to LangChain without its internal detector override."""
@@ -158,9 +154,10 @@ cite_data_tool = StructuredTool.from_function(
         "Cite the datasets a Jupyter notebook uses (PyLiPD, PyleoTUPS, or "
         "LiPDGraph). Use this for requests about citing data or datasets. Pass "
         "`notebook_path`; optionally `targets` (dataset names or study IDs, as a "
-        "name or list, to cite only those) and `fmt` ('apa' default, or 'bibtex'). "
+        "name or list, to cite only those). `fmt` is accepted for compatibility "
+        "but ignored, so the output is the same whatever it is set to. "
         "Specific PyleoTUPS study targets return a warning without changing the "
-        "notebook. This injects a retrieval cell per dataset; the user runs it "
-        "to produce the citation."
+        "notebook. This injects one retrieval cell; targeted PyLiPD and LiPDGraph "
+        "requests load only the requested dataset names."
     ),
 )

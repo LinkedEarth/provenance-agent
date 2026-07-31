@@ -40,11 +40,9 @@ Implementation:
       can handle that name for its own provider.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names): appends
       the single dataset cell covering every pair to an nbformat notebook node,
-      or nothing when pairs is empty. fmt defaults to "bibtex" and accepts "apa"
-      to render citations in APA format.
+      or nothing when pairs is empty.
     - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject
-      the single dataset cell, then write. fmt defaults to "bibtex" and can be
-      "apa" for APA-formatted output.
+      the single dataset cell, then write.
 
 Design decisions:
     - Cells are written for the user to run (live-kernel model); this module does
@@ -56,8 +54,13 @@ Design decisions:
       correctly. _LIPDVERSE_ENDPOINT is only a fallback when no URL is found.
     - Dataset-name targets are source-loading instructions for PyLiPD and
       LiPDGraph, so targeted requests avoid loading unrelated datasets. A
-      specific PyleoTUPS study-name target cannot be resolved before the live
+      specific PyleoTUPS study name or ID cannot be resolved before the live
       object runs, so it warns and leaves the notebook unchanged.
+    - `fmt` is accepted everywhere it appears and ignored everywhere. APA
+      rendering was removed with the LLM chain that produced it, so there is no
+      second format to select; "bibtex", "apa", and any other value produce the
+      same cell. The parameter is retained so callers and the agent's
+      RouteDecision stay stable for a future non-LLM APA implementation.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
@@ -175,11 +178,11 @@ def build_retrieval_cell(
     else:
         raise ValueError(f"Unsupported dataset tool: {tool!r}")
 
-
-    #D=LiPD()
+    #Don't delete this commented code, it is a test for the LiPD() class and its methods
+    '''#D=LiPD()
     #D.setendpoint()
     #D.load_remote_datasets("datasetname")
-    #Bib,df = D.get_bibtext()
+    #Bib,df = D.get_bibtext()'''
 
 
     metadata_filter = ""
@@ -213,6 +216,7 @@ def build_dataset_cell(
     Args:
         pairs: the [variable, tool] pairs to retrieve citations for
         endpoint: LiPDGraph endpoint baked into any LiPDGraph block
+        fmt: accepted and ignored; see the module docstring
         dataset_names: optional exact dataset names passed to targeted
             PyLiPD/LiPDGraph retrievals
 
@@ -296,7 +300,7 @@ def pyleotups_target_warning(
 
     PyleoTUPS study names or IDs are only available inside the notebook's
     in-memory provider object, so the workflow cannot safely select one by a
-    user-supplied dataset name before executing the notebook's existing object.
+    user-supplied name or ID before executing the notebook's existing object.
     Notebook source variables are internal detector output, not valid targets.
 
     Args:
@@ -317,9 +321,9 @@ def pyleotups_target_warning(
         return None
 
     return (
-        "Cannot cite a specific PyleoTUPS study by name because the available "
-        "study names are not known before the notebook runs. Ask to cite all "
-        "datasets instead."
+        "Cannot cite a specific PyleoTUPS study by name or ID because the "
+        "available studies are not known before the notebook runs - they live "
+        "inside the in-memory provider object. Ask to cite all datasets instead."
     )
 
 
@@ -343,7 +347,7 @@ def inject_retrieval_cells(
             appends nothing
         endpoint: LiPDGraph endpoint to bake into any LiPDGraph block; falls
             back to _LIPDVERSE_ENDPOINT when None
-        fmt: "bibtex" (default) or "apa" - citation format for the cell
+        fmt: accepted and ignored; see the module docstring
         dataset_names: optional exact dataset names passed to targeted
             PyLiPD/LiPDGraph retrievals
 
@@ -376,7 +380,7 @@ def generate_data_workflow(
     filters them, appends the single dataset-citation cell, and writes the
     notebook back. The cell displays each source's metadata frame. Targeted
     PyLiPD and LiPDGraph cells load only requested dataset names when the user
-    runs them in the live kernel. A specific PyleoTUPS study-name target emits
+    runs them in the live kernel. A specific PyleoTUPS study name or ID emits
     a warning and returns without changing the notebook.
 
     Args:
@@ -386,8 +390,7 @@ def generate_data_workflow(
             must use dataset names through ``targets``
         output_path: where to write the modified notebook (defaults to
             notebook_path, i.e. in place)
-        fmt: "bibtex" (default) or "apa" - format for citations in the
-            injected cell
+        fmt: accepted and ignored; see the module docstring
         targets: optional exact dataSetName values or study IDs; targeted
             PyLiPD/LiPDGraph names are applied inside retrieval cells, while a
             non-empty target with a PyleoTUPS source warns and performs no write

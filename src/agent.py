@@ -29,6 +29,12 @@ Design decisions:
       known inside the live provider object.
     - The existing StructuredTool wrappers remain public for direct callers,
       but they are not bound to the classification model.
+    - ``fmt`` is still classified and carried through dispatch, but it has no
+      downstream effect: APA rendering was removed, so ``cite_data`` accepts any
+      value and ignores it. The prompt still mentions APA and the field is a
+      plain ``str`` rather than a ``Literal``, so an unexpected value cannot
+      fail classification. The surface is held open for a future non-LLM APA
+      implementation.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
       the module-level ``chain`` uses the configured Gemini client.
 """
@@ -76,7 +82,9 @@ class RouteDecision(BaseModel):
     scope: Literal["all", "selected"]
     targets: list[TypedTarget] = Field(default_factory=list)
     kinds: list[Literal["software", "data"]] = Field(default_factory=list)
-    fmt: Literal["apa", "bibtex"] = "apa"
+    # Plain str, not a Literal: fmt is carried through to cite_data but ignored
+    # there, so an unexpected value must not fail classification.
+    fmt: str = "bibtex"
     warning: str | None = None
 
 
@@ -94,6 +102,8 @@ SYSTEM_PROMPT = (
     "scope 'all' with the corresponding kind.\n\n"
     "For specifically named requests, return scope 'selected' and one typed "
     "target per named item: {{\"kind\": \"software\"|\"data\", \"name\": \"...\"}}.\n\n"
+    "Use BibTeX as the default format when the request does not explicitly "
+    "ask for APA.\n\n"
     "If a requested software library is not in the imported-library list, "
     "return action 'warning' and explain that it is not imported. If the "
     "request is unclear or unrelated, return action 'warning' and explain why.\n\n"
