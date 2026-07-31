@@ -3,16 +3,20 @@ Unit tests for orchestrator.py. Fully offline: cite_software injects a metadata
 cell (reads imports + writes a notebook, no Gemini), and cite_data is exercised
 with a monkeypatched detector so no network call is made. Both write to a tmp
 output_path so the fixture notebooks are never mutated.
+
+fmt is accepted and ignored rather than validated, so the tests here pin
+acceptance of arbitrary values and identical output across them, not rejection.
 """
 
 import os
 import sys
+import inspect
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from orchestrator import _check_fmt, cite_software
+from orchestrator import cite_software
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
 
@@ -28,9 +32,11 @@ def _write_lipdgraph_notebook(path):
         nbformat.write(nb, f)
 
 
-def test_check_fmt_rejects_unknown():
-    with pytest.raises(ValueError):
-        _check_fmt("markdown")
+def test_format_validation_is_removed():
+    import orchestrator
+
+    assert not hasattr(orchestrator, "_check_fmt")
+    assert not hasattr(orchestrator, "_VALID_FMT")
 
 
 def test_cite_software_all_injects_and_returns_libraries(tmp_path):
@@ -86,6 +92,11 @@ def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
     assert "display(_meta_filtered_df2)" in out.cells[-1].source
 
 
+def test_cite_data_defaults_to_bibtex():
+    from orchestrator import _cite_data_tool_entry, cite_data
+
+    assert inspect.signature(cite_data).parameters["fmt"].default == "bibtex"
+    assert inspect.signature(_cite_data_tool_entry).parameters["fmt"].default == "bibtex"
 
 
 def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
@@ -108,10 +119,114 @@ def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
     assert pairs == [["filtered_df2", "LiPDGraph"]]
 
 
-def test_cite_data_rejects_bad_fmt(tmp_path):
+@pytest.mark.parametrize("fmt", ["bibtex", "apa", "html", "not-a-format"])
+def test_cite_data_accepts_any_fmt_with_identical_output(tmp_path, monkeypatch, fmt):
+    """Every fmt value is accepted and produces the same cell as the default."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda _path: [["filtered_df2", "LiPDGraph"]],
+    )
+    import nbformat
     from orchestrator import cite_data
-    with pytest.raises(ValueError):
-        cite_data(str(tmp_path / "x.ipynb"), fmt="html")
+
+    def inject(suffix, **kwargs):
+        nb_in = tmp_path / f"in_{suffix}.ipynb"
+        nb_out = tmp_path / f"out_{suffix}.ipynb"
+        _write_lipdgraph_notebook(str(nb_in))
+        pairs = cite_data(str(nb_in), output_path=str(nb_out), **kwargs)
+        return pairs, nbformat.read(str(nb_out), as_version=4).cells[-1].source
+
+    default_pairs, default_cell = inject("default")
+    pairs, cell = inject(fmt.replace("-", "_"), fmt=fmt)
+
+    assert pairs == default_pairs == [["filtered_df2", "LiPDGraph"]]
+    assert cell == default_cell
+
+
+def test_cite_data_tool_accepts_any_fmt(tmp_path, monkeypatch):
+    """The StructuredTool boundary accepts fmt too, so tool callers do not break."""
+    import dataset_detection
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda _path: [["filtered_df2", "LiPDGraph"]],
+    )
+    notebook = tmp_path / "tool.ipynb"
+    _write_lipdgraph_notebook(str(notebook))
+
+    from orchestrator import cite_data_tool
+    pairs = cite_data_tool.invoke(
+        {"notebook_path": str(notebook), "fmt": "apa"}
+    )
+    assert pairs == [["filtered_df2", "LiPDGraph"]]
+
+
+def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatch):
+    """
+    The active data path is deterministic. Detonate the deprecated LLM helpers
+    and the shared client: reaching any of them fails the test.
+    """
+    import dataset_detection
+    import llm
+
+    def detonate(*_args, **_kwargs):
+        raise AssertionError("the deprecated LLM detection path was used")
+
+    class _NoClient:
+        """Stands in for the Gemini client; any use of it fails the test."""
+
+        def __getattr__(self, name):
+            detonate()
+
+    monkeypatch.setattr(dataset_detection, "build_detection_prompt", detonate)
+    monkeypatch.setattr(dataset_detection, "parse_detection_response", detonate)
+    monkeypatch.setattr(llm, "llm", _NoClient())
+
+    # A notebook the real analyzer resolves, so this asserts the deterministic
+    # detector produced the answer rather than that nothing ran at all.
+    import nbformat
+    notebook = tmp_path / "deterministic.ipynb"
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(
+        "from pylipd.lipd import LiPD\n"
+        "import pyleoclim as pyleo\n"
+        "D = LiPD()\n"
+        'D.load("dataset.lpd")\n'
+        "timeseries = D.get_timeseries(D.get_all_dataset_names())\n"
+        "series = pyleo.Series(time=timeseries.time, value=timeseries.value)\n"
+        "result = series.pca()\n"
+    )])
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+
+    from orchestrator import cite_data
+    assert cite_data(str(notebook)) == [["D", "PyLiPD"]]
+
+
+@pytest.mark.parametrize("target", ["830587", "TR04EVLI"])
+def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
+    tmp_path, monkeypatch, target
+):
+    """A specific PyleoTUPS study, by numeric ID or name, is a warned no-op."""
+    import dataset_detection
+    import nbformat
+    monkeypatch.setattr(
+        dataset_detection, "detect_datasets",
+        lambda _path: [["ds", "PyleoTUPS"]],
+    )
+    notebook = tmp_path / "pyleotups.ipynb"
+    nb = nbformat.v4.new_notebook(
+        cells=[nbformat.v4.new_code_cell("ds = PangaeaDataset()")]
+    )
+    with open(notebook, "w") as handle:
+        nbformat.write(nb, handle)
+    before = notebook.read_bytes()
+
+    from orchestrator import cite_data
+    with pytest.warns(UserWarning, match="specific PyleoTUPS"):
+        pairs = cite_data(str(notebook), targets=target)
+
+    assert pairs == []
+    assert notebook.read_bytes() == before
 
 
 def test_tools_are_structured_tools():

@@ -58,6 +58,11 @@ def test_generated_retrieval_cell_is_classified_as_data_without_frame_binding():
     assert agent._cell_tool(source) == "data"
 
 
+def test_route_decision_defaults_to_bibtex():
+    decision = agent.RouteDecision(action="cite", scope="all")
+    assert decision.fmt == "bibtex"
+
+
 def _fake_model(decision):
     return RunnableLambda(
         lambda _prompt: AIMessage(content=json.dumps(decision))
@@ -251,6 +256,49 @@ def test_both_targets_dispatch_in_order_and_reuse_detection(tmp_path, monkeypatc
     assert {cell["tool"] for cell in result["verification"]["cells"]} == {
         "software", "data"
     }
+
+
+def test_cite_everything_defaults_to_two_generated_cells(tmp_path, monkeypatch):
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    monkeypatch.setattr(
+        agent,
+        "_detect_dataset_pairs",
+        lambda _path: [["filtered_df2", "LiPDGraph"]],
+    )
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software", "data"],
+        "targets": [],
+        # Deliberately omit fmt: the typed decision default is part of the API.
+    }
+
+    result = agent.build_chain(_fake_model(decision)).invoke({
+        "request": "cite everything in bibtex",
+        "notebook_path": str(notebook),
+    })
+
+    written = nbformat.read(str(notebook), as_version=4)
+    generated = [
+        cell for cell in written.cells
+        if "# provenance-agent-generated" in cell.source
+    ]
+    assert result["decision"]["fmt"] == "bibtex"
+    assert result["dispatch"][1]["args"]["fmt"] == "bibtex"
+    assert len(generated) == 2
+    assert sum("provenance_software" in cell.source for cell in generated) == 1
+    assert sum(
+        "provenance_software" not in cell.source for cell in generated
+    ) == 1
+    assert "# provenance-combine-cell" not in "".join(
+        cell.source for cell in written.cells
+    )
+    data_cell = next(
+        cell for cell in generated if "provenance_software" not in cell.source
+    )
+    assert "provenance_datasets" not in data_cell.source
+    assert "display(_meta_filtered_df2)" in data_cell.source
 
 
 def test_run_returns_the_chain_envelope(monkeypatch):
