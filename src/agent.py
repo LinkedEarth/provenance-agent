@@ -148,11 +148,10 @@ def _prepare_context(state: dict) -> dict:
 
 
 def _detect_dataset_pairs(notebook_path: str) -> list[list[str]]:
-    """Runs the existing dataset detector for a data-bearing request."""
+    """Runs the deterministic dataset detector for a data-bearing request."""
     from dataset_detection import detect_datasets
-    from notebook_parser import read_notebook_code
 
-    return detect_datasets(read_notebook_code(notebook_path))
+    return detect_datasets(notebook_path)
 
 
 def _warning_state(state: dict, message: str) -> dict:

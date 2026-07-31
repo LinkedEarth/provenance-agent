@@ -372,7 +372,7 @@ def generate_data_workflow(
     """
     Detects datasets in a notebook and injects their citation-retrieval cells.
 
-    Reads the notebook, detects its dataset variables via the LLM, optionally
+    Reads the notebook, detects its dataset variables deterministically, optionally
     filters them, appends the single dataset-citation cell, and writes the
     notebook back. The cell displays each source's metadata frame. Targeted
     PyLiPD and LiPDGraph cells load only requested dataset names when the user
@@ -406,7 +406,11 @@ def generate_data_workflow(
         )
 
     code = read_notebook_code(notebook_path)
-    detected = detect_datasets(code) if detected_pairs is None else detected_pairs
+    detected = (
+        detect_datasets(notebook_path)
+        if detected_pairs is None
+        else detected_pairs
+    )
     scoped_detected = filter_datasets(detected, tool=tool)
     target = targets
     target_warning = pyleotups_target_warning(scoped_detected, target)

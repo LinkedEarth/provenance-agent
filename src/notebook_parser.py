@@ -5,8 +5,8 @@ and extracts the Python libraries they import.
 Purpose:
     The software workflow needs the set of imported libraries so it can look up
     their citations. This module does that extraction with `ast`, plus it
-    provides `read_notebook_code()`, the raw-code reader shared with the LLM
-    dataset detector (dataset_detection.py).
+    provides `read_notebook_code()`, the raw-code reader used by the data
+    workflow for code-oriented checks such as endpoint extraction.
 
 Implementation:
     - strip_ipython_directives(code): removes magics (`%`, `%%`) and shell
@@ -19,7 +19,7 @@ Implementation:
     - parse_notebook(path): reads a notebook and returns its sorted list of
       imported library names.
     - read_notebook_code(path): returns all code cells concatenated (directives
-      stripped) - the full source the LLM detector reasons over.
+      stripped) for code-oriented workflow checks.
     - validate_libraries(requested, available): case-insensitive membership
       check used by the "cite one specific library" mode.
     - is_generated_cell(source): True for cells this tool injected. Both scans
@@ -33,10 +33,9 @@ Design decisions:
       a second run cite a library the notebook never used. New cells carry
       PROVENANCE_CELL_MARKER; the legacy signatures are matched too so notebooks
       written by earlier versions need no re-run.
-    - Detection of *datasets* is NOT done here. It is done by an LLM in
-      dataset_detection.py, because tracing data flow to the terminal analysis
-      variable across many cells is far more robust with an LLM than with static
-      AST analysis. This module is purely the software (import) side.
+    - Detection of *datasets* is NOT done here. It is delegated to the
+      deterministic detector exposed by dataset_detection.py. This module is
+      otherwise purely the software (import) side.
 """
 
 import ast
@@ -199,8 +198,8 @@ def read_notebook_code(path: str) -> str:
     """
     Reads a .ipynb file and returns all code cells concatenated into one string,
     with IPython directives (magics, shell lines) stripped so the result is
-    valid Python. Used by the LLM dataset detector, which reasons over the full
-    notebook source.
+    valid Python. Used by code-oriented workflow checks such as endpoint
+    extraction.
 
     Args:
         path: path to a .ipynb file
