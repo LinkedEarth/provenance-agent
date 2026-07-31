@@ -1,33 +1,35 @@
 """
-Bibliography assembly and APA rendering - the output stage where the software
-and data workflows converge into one bibliography.
+Software citation lookup plus the generated-cell lifecycle helpers both
+workflows share.
 
-Two layers, and only one of them is software-specific:
-  - Collection (software-specific here): looks up a notebook's imported
-    libraries in Citations/ (a YAML index plus per-library .bib files) and
-    merges their BibTeX, deduped by DOI. Dataset citations are collected
-    elsewhere - by the data workflow (data_workflow.py), which runs
-    get_bibtex()/get_publications() in the notebook's live kernel.
-  - Rendering/assembly (shared by both workflows): turns BibTeX into APA via
-    the LLM and assembles the final bibliography. Dataset BibTeX from the data
-    workflow is folded in as strings via the dataset_bibtex argument.
+Collection is software-specific: it looks up a notebook's imported libraries in
+Citations/ (a YAML index plus per-library .bib files) and merges their BibTeX
+into one DataFrame, deduped by DOI. Dataset citations are collected elsewhere -
+by the data workflow (data_workflow.py), which runs get_bibtex() /
+get_publications() in the notebook's live kernel.
 
 Implementation:
     - load_citation_index(): loads library_citations.yml (library name -> its
       inline "paper" BibTeX and/or a "software" .bib file).
     - collect_library_entries(libraries, citation_types): merges the matching
       software BibTeX entries into a DataFrame, deduped by DOI, optionally
-      filtered to "paper" and/or "software".
-    - render_apa(entries): takes the DataFrame from collect_library_entries()
-      and converts each entry's BibTeX to APA via the LLM.
-    - render_bibtex_strings_to_apa(): turns raw BibTeX strings (e.g. dataset
-      citations) into APA text via the LLM.
-    - generate_bibliography() / generate_bibliography_cell(): assemble the final
-      bibliography (libraries + optional dataset BibTeX) as text or as a JSON
-      notebook markdown cell.
+      filtered to "paper" and/or "software". This is what the injected software
+      cell calls, so the DataFrame is the citation output the user sees.
+    - remove_provenance_cells() / remove_legacy_combine_cells(): drop a
+      workflow's previously injected cell so a re-run replaces it instead of
+      stacking a second, stale one.
+
+Design decisions:
+    - There is no rendering layer here. APA rendering was removed along with the
+      LLM chain that produced it: citations are surfaced as the injected cell's
+      DataFrame output, not as assembled text. The data workflow still accepts
+      an `fmt` argument for compatibility, but it is ignored, so no module
+      renders citation text in any format.
+    - The cell-lifecycle helpers live here rather than in notebook_parser
+      because they are written against the frame names this module's output is
+      bound to. Relocating them is deferred to the module-rename task.
 """
 
-import json
 import os
 import sys
 
@@ -182,79 +184,6 @@ def collect_library_entries(
     return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
 
 
-def render_apa(entries: pd.DataFrame) -> str:
-    """
-    Converts collected citation entries to APA 7th edition plain text by
-    sending each entry's BibTeX through the LLM.
-
-    Args:
-        entries: DataFrame from collect_library_entries(), must have a
-            "bibtex" column
-
-    Returns:
-        APA-formatted citation string with entries separated by blank lines
-    """
-    from llm import bibtex_to_apa
-
-    citations = [
-        bibtex_to_apa(bibtex)
-        for bibtex in entries["bibtex"]
-        if bibtex
-    ]
-    return "\n\n".join(citations)
-
-
-def render_bibtex_strings_to_apa(bibtex_strings: list[str]) -> str:
-    """
-    Converts raw BibTeX strings to APA via the LLM.
-    Used for dataset citations produced by the data workflow (data_workflow.py),
-    which returns BibTeX as strings from get_bibtex() / get_publications().
-
-    Args:
-        bibtex_strings: list of BibTeX entry strings
-
-    Returns:
-        APA-formatted citation string with entries separated by blank lines
-    """
-    from llm import bibtex_to_apa
-
-    citations = []
-    for bibtex_str in bibtex_strings:
-        apa = bibtex_to_apa(bibtex_str.strip())
-        citations.append(apa)
-
-    return "\n\n".join(citations)
-
-
-def render_bibtex_strings_to_df(bibtex_strings: list[str], source: str) -> pd.DataFrame:
-    """
-    Parses raw BibTeX strings into the uniform citation DataFrame.
-
-    The DataFrame twin of render_bibtex_strings_to_apa: where that renders
-    dataset BibTeX to APA text, this renders it to the same citation schema
-    collect_library_entries produces, so software and dataset citations share
-    one shape and can be concatenated by a caller that wants both. The
-    schema includes a ``note`` column for imported libraries without a local
-    citation.
-
-    Args:
-        bibtex_strings: raw BibTeX entry strings (e.g. the data workflow's
-            _bib_{var} list from get_bibtex()/get_publications())
-        source: label written to the "library" column (the notebook variable
-            the datasets came from)
-
-    Returns:
-        a DataFrame with the uniform citation columns; citation_type is
-        "dataset" and rows are deduped by DOI
-    """
-    seen_dois: set[str] = set()
-    rows: list[dict] = []
-    for bibtex_str in bibtex_strings:
-        for entry in bibtexparser.loads(bibtex_str, parser=_bibtex_parser()).entries:
-            _add_entry_row(rows, seen_dois, source, "dataset", entry)
-    return pd.DataFrame(rows, columns=_DATAFRAME_COLUMNS)
-
-
 _LEGACY_COMBINE_MARKER = "# provenance-combine-cell"
 
 SOFTWARE_FRAME = "provenance_software"
@@ -305,87 +234,3 @@ def remove_legacy_combine_cells(nb) -> None:
         cell for cell in nb.cells
         if not (cell.cell_type == "code" and _LEGACY_COMBINE_MARKER in cell.source)
     ]
-
-
-def generate_bibliography(
-    libraries: list[str],
-    citation_types: list[str] | None = None,
-    dataset_bibtex: list[str] | None = None,
-) -> str:
-    """
-    Produces a bibliography string for a notebook's imported libraries.
-    Collects library citations from local YAML/.bib files and renders them
-    to APA. Dataset citations are not collected here — the data workflow
-    produces them and they can be folded in via dataset_bibtex.
-
-    Args:
-        libraries: imported library names (from parse_notebook())
-        citation_types: optional filter for library citations —
-            "paper" and/or "software"
-        dataset_bibtex: optional list of BibTeX strings for dataset
-            citations, produced by the data workflow (data_workflow.py)
-
-    Returns:
-        formatted bibliography string
-    """
-    parts = []
-
-    # Library citations
-    index = load_citation_index()
-    entries = collect_library_entries(libraries, citation_types)
-
-    if not entries.empty:
-        parts.append(render_apa(entries))
-
-    not_found = [lib for lib in libraries
-                 if lib.lower() not in index and lib not in _STDLIB_MODULES]
-    if not_found:
-        parts.append("\n".join(f"[No citation found for: {lib}]" for lib in not_found))
-
-    # Dataset citations (produced by the data workflow)
-    if dataset_bibtex:
-        parts.append(render_bibtex_strings_to_apa(dataset_bibtex))
-
-    return "\n\n".join(parts)
-
-
-def generate_bibliography_cell(
-    libraries: list[str],
-    citation_types: list[str] | None = None,
-    dataset_bibtex: list[str] | None = None,
-) -> str:
-    """
-    Produces a JSON-formatted Jupyter markdown cell containing the bibliography.
-    The returned JSON string can be parsed and appended to a notebook's cell
-    list.
-
-    Args:
-        libraries: imported library names (from parse_notebook())
-        citation_types: optional filter for library citations
-        dataset_bibtex: optional list of BibTeX strings for dataset
-            citations, produced by the data workflow (data_workflow.py)
-
-    Returns:
-        JSON string representing a notebook markdown cell with the bibliography
-    """
-    bib_text = generate_bibliography(libraries, citation_types, dataset_bibtex)
-    cell = {
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": [f"## Bibliography\n\n{bib_text}"],
-    }
-    return json.dumps(cell, indent=2)
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python bibliography.py <path_to_notebook.ipynb>")
-        sys.exit(1)
-
-    sys.path.insert(0, os.path.dirname(__file__))
-    from notebook_parser import parse_notebook
-
-    notebook_path = sys.argv[1]
-    result = parse_notebook(notebook_path)
-    bib_text = generate_bibliography(result)
-    print(bib_text)

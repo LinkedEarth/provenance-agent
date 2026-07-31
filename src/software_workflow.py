@@ -29,8 +29,7 @@ Design decisions:
     - The cell imports from bibliography rather than baking the collected BibTeX
       inline, so it stays short and always reflects the current Citations/ data;
       this means src/ must be on the kernel's sys.path for the import to succeed
-      (the demo notebooks add it, and the data workflow's APA cell has the same
-      requirement).
+      (the demo notebooks add it).
     - One cell for all libraries, because all software citations resolve to a
       single DataFrame - there is no per-library live object to reuse.
     - Citations are surfaced as the injected cell's OUTPUT, not as this module's

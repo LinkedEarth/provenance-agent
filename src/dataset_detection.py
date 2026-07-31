@@ -9,16 +9,28 @@ Purpose:
 
 Implementation:
     - detect_datasets(notebook_path): delegates to the deterministic detector
-      and returns the existing [variable, tool] pair contract.
+      and returns the existing [variable, tool] pair contract. This is the
+      active path.
     - DETECTION_PROMPT, build_detection_prompt(), and
-      parse_detection_response() remain as legacy LLM helpers for compatibility
-      and reference; they are no longer used by active detection.
+      parse_detection_response(): DEPRECATED. They are the retained LLM
+      detection path, kept as a rollback option and never called by active
+      detection. See below.
+
+Deprecated LLM fallback:
+    Detection used to send the notebook's code to Gemini and parse a JSON list
+    of pairs out of the reply. That path is deprecated but deliberately intact,
+    so the project can switch back without reconstructing it. It consists of
+    DETECTION_PROMPT, build_detection_prompt(), _strip_code_fences(),
+    parse_detection_response(), and the commented-out call inside
+    detect_datasets(). Restoring it means uncommenting that call; nothing else
+    references these helpers, they emit no deprecation warning, and their tests
+    are kept so the fallback stays known-good.
 
 Design decisions:
     - The public active detector accepts a notebook path so the static analyzer
-      can preserve notebook cell boundaries and ignore generated cells.
-    - The former LLM implementation is commented out inside detect_datasets()
-      rather than deleted, making the transition easy to inspect or reverse.
+      can preserve notebook cell boundaries and ignore generated cells. The
+      deprecated LLM path took concatenated code instead, which is why the
+      commented-out call reads differently from the active one.
     - detect_datasets() preserves its list return contract while emitting
       UserWarning messages for unresolved analysis source lineage. Callers that
       need structured diagnostics can use detect_datasets_with_diagnostics().
@@ -30,6 +42,8 @@ import json
 import warnings
 
 
+# DEPRECATED: the prompt for the retained LLM fallback. Active detection is
+# deterministic and never sends this to a model.
 DETECTION_PROMPT = """Analyze a Jupyter notebook to identify which dataset source variables are actually used for
 scientific inquiry and analysis that would yield citations. For each dataset source in the notebook,
 trace the data flow through the notebook and identify the final variable that holds the data actually
@@ -50,7 +64,10 @@ Notebook code:
 
 def build_detection_prompt(code: str) -> str:
     """
-    Fills the detection prompt template with the notebook code.
+    DEPRECATED. Fills the detection prompt template with the notebook code.
+
+    Part of the retained LLM fallback; active detection is deterministic and
+    never calls this. See the module docstring.
 
     Args:
         code: the notebook's Python source (all code cells concatenated)
@@ -75,7 +92,11 @@ def _strip_code_fences(text: str) -> str:
 
 def parse_detection_response(text: str) -> list[list[str]]:
     """
-    Extracts the JSON list of [variable, tool] pairs from the model's reply.
+    DEPRECATED. Extracts the JSON list of [variable, tool] pairs from the
+    model's reply.
+
+    Part of the retained LLM fallback; active detection is deterministic and
+    never calls this. See the module docstring.
 
     Tolerates markdown code fences and surrounding prose by parsing the first
     JSON array found in the text. Only well-formed 2-element pairs are kept;
@@ -121,7 +142,9 @@ def detect_datasets(notebook_path: str) -> list[list[str]]:
     Returns:
         deterministic list of [variable, tool] pairs
     """
-    # Legacy LLM implementation, retained for reference during the transition:
+    # DEPRECATED LLM fallback, retained so the project can switch back. To
+    # restore it, read the notebook's code with
+    # notebook_parser.read_notebook_code(notebook_path) and run:
     # from llm import llm, message_text
     # response = llm.invoke(build_detection_prompt(code))
     # return parse_detection_response(message_text(response))

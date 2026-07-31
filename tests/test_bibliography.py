@@ -1,11 +1,15 @@
 """
 Unit tests for bibliography.py's collect_library_entries(). Uses real
 Citations/ data (pyleoclim has both a paper and a software citation) plus
-a monkeypatched citation index for the DOI-dedup case. Also covers
-render_bibtex_strings_to_df as a standalone BibTeX utility. The injected data
+a monkeypatched citation index for the DOI-dedup case. The injected data
 workflow uses source metadata directly; the software schema also includes a
 note row for imported libraries without citations, except for standard-library
 imports, which are dropped entirely.
+
+The APA rendering and bibliography-assembly functions were removed along with
+the LLM chain behind them, so this module no longer covers render_apa,
+render_bibtex_strings_to_apa, render_bibtex_strings_to_df, or
+generate_bibliography.
 """
 
 import os
@@ -16,10 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import nbformat
 
 import bibliography
-from bibliography import (
-    collect_library_entries,
-    render_bibtex_strings_to_df,
-)
+from bibliography import collect_library_entries
 
 FAKE_INDEX_SHARED_DOI = {
     "liba": {
@@ -105,65 +106,22 @@ def test_multiple_libraries_with_distinct_papers_are_not_corrupted():
     assert by_library.loc["pyleoclim", "doi"] == "10.1029/2022PA004509"
 
 
-def test_render_apa_calls_llm_per_row_and_joins(monkeypatch):
+# --- APA rendering is gone ---------------------------------------------------
+
+def test_apa_rendering_surface_is_removed():
+    """The LLM rendering path is deleted, not merely unused."""
+    for name in (
+        "render_apa",
+        "render_bibtex_strings_to_apa",
+        "render_bibtex_strings_to_df",
+        "generate_bibliography",
+        "generate_bibliography_cell",
+    ):
+        assert not hasattr(bibliography, name)
+
     import llm
-    monkeypatch.setattr(llm, "bibtex_to_apa", lambda bibtex: f"APA[{bibtex[:20]}]")
 
-    df = collect_library_entries(["pyleoclim"], citation_types=["software"])
-    out = bibliography.render_apa(df)
-    assert out.startswith("APA[@software{pyleoclim_")
-
-
-def test_generate_bibliography_includes_library_citation(monkeypatch):
-    import llm
-    monkeypatch.setattr(llm, "bibtex_to_apa", lambda bibtex: "APA_CITATION")
-
-    out = bibliography.generate_bibliography(["pyleoclim"])
-    assert "APA_CITATION" in out
-
-
-def test_generate_bibliography_reports_unknown_library():
-    out = bibliography.generate_bibliography(["definitely_not_a_real_library"])
-    assert "No citation found for: definitely_not_a_real_library" in out
-
-
-_BIB_A = """@article{smith2020,
-  author = {Smith, J.},
-  title = {Dataset A},
-  year = {2020},
-  doi = {10.1000/a}
-}"""
-_BIB_B = """@article{jones2021,
-  author = {Jones, K.},
-  title = {Dataset B},
-  year = {2021},
-  doi = {10.1000/b}
-}"""
-
-
-def test_strings_to_df_has_uniform_schema():
-    df = render_bibtex_strings_to_df([_BIB_A], source="D")
-    assert list(df.columns) == EXPECTED_COLUMNS
-    row = df.iloc[0]
-    assert row["library"] == "D"
-    assert row["citation_type"] == "dataset"
-    assert row["key"] == "smith2020"
-
-
-def test_strings_to_df_dedupes_by_doi():
-    df = render_bibtex_strings_to_df([_BIB_A, _BIB_A], source="D")
-    assert len(df) == 1
-
-
-def test_strings_to_df_multiple_entries():
-    df = render_bibtex_strings_to_df([_BIB_A, _BIB_B], source="D")
-    assert len(df) == 2
-
-
-def test_strings_to_df_empty_input_is_empty_framed():
-    df = render_bibtex_strings_to_df([], source="D")
-    assert df.empty
-    assert list(df.columns) == EXPECTED_COLUMNS
+    assert not hasattr(llm, "bibtex_to_apa")
 
 
 # --- standard-library imports ------------------------------------------------

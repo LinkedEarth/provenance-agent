@@ -204,7 +204,7 @@ def test_split_targets_mixed_targets_keeps_all_for_name_filter():
     )
 
 
-@pytest.mark.parametrize("target", ["TR04EVLI", "ds"])
+@pytest.mark.parametrize("target", ["TR04EVLI", "ds", "830587"])
 def test_pyleotups_target_warns_without_mutating_notebook(
     tmp_path, monkeypatch, target
 ):
