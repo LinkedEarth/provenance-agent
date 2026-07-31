@@ -189,8 +189,8 @@ def test_split_targets_empty_keeps_all_without_dataset_names():
     assert split_targets(PAIRS, []) == (PAIRS, [])
 
 
-def test_split_targets_variable_target_keeps_matching_pair():
-    assert split_targets(PAIRS, "ds") == ([PAIRS[1]], [])
+def test_split_targets_treats_variable_like_any_dataset_name():
+    assert split_targets(PAIRS, "ds") == (PAIRS, ["ds"])
 
 
 def test_split_targets_dataset_name_applies_to_all_pairs():
@@ -198,10 +198,16 @@ def test_split_targets_dataset_name_applies_to_all_pairs():
 
 
 def test_split_targets_mixed_targets_keeps_all_for_name_filter():
-    assert split_targets(PAIRS, ["ds", "TR04EVLI"]) == (PAIRS, ["TR04EVLI"])
+    assert split_targets(PAIRS, ["ds", "TR04EVLI"]) == (
+        PAIRS,
+        ["ds", "TR04EVLI"],
+    )
 
 
-def test_pyleotups_study_target_warns_without_mutating_notebook(tmp_path, monkeypatch):
+@pytest.mark.parametrize("target", ["TR04EVLI", "ds"])
+def test_pyleotups_target_warns_without_mutating_notebook(
+    tmp_path, monkeypatch, target
+):
     import dataset_detection
 
     monkeypatch.setattr(
@@ -223,17 +229,14 @@ def test_pyleotups_study_target_warns_without_mutating_notebook(tmp_path, monkey
     with pytest.warns(UserWarning, match="specific PyleoTUPS"):
         pairs = generate_data_workflow(
             str(notebook),
-            targets="TR04EVLI",
+            targets=target,
         )
 
     assert pairs == []
     assert notebook.read_bytes() == before
 
 
-@pytest.mark.parametrize("target", [None, "ds"])
-def test_pyleotups_all_or_source_variable_target_still_injects(
-    tmp_path, monkeypatch, target
-):
+def test_pyleotups_all_datasets_request_still_injects(tmp_path, monkeypatch):
     import dataset_detection
 
     monkeypatch.setattr(
@@ -251,7 +254,7 @@ def test_pyleotups_all_or_source_variable_target_still_injects(
 
     from data_workflow import generate_data_workflow
 
-    pairs = generate_data_workflow(str(notebook), targets=target)
+    pairs = generate_data_workflow(str(notebook))
 
     assert pairs == [["ds", "PyleoTUPS"]]
     written = nbformat.read(str(notebook), as_version=4)
@@ -323,14 +326,13 @@ def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatc
     assert 'filtered_df2["dataSetName"]' not in retrieval
 
 
-def test_generate_data_workflow_rejects_both_target_aliases(tmp_path):
+def test_generate_data_workflow_rejects_variable_targets(tmp_path):
     from data_workflow import generate_data_workflow
 
-    with pytest.raises(ValueError, match="either targets or variable"):
+    with pytest.raises(ValueError, match="source-variable targeting"):
         generate_data_workflow(
             str(tmp_path / "missing.ipynb"),
             variable="D",
-            targets="TR04EVLI",
         )
 
 

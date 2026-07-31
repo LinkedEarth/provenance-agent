@@ -131,17 +131,18 @@ preserved without adding a public mode selector.
 
 PyleoTUPS source objects may contain multiple studies, but the user-facing
 request does not know the study names available inside a notebook variable. The
-workflow therefore distinguishes source selection from study-name selection:
+workflow therefore distinguishes all-data requests from targeted
+dataset/study-identifier requests:
 
 - an all-data request with no target (`targets=None`) cites every detected
   analysis-used PyleoTUPS source, using the studies already held by that source
   object;
-- a target that exactly matches a detected notebook source variable may select
-  that source object;
-- an unmatched target is treated as a requested dataset name. If the notebook
-  contains a PyleoTUPS source relevant to the request, the workflow returns a
-  warning explaining that a specific PyleoTUPS study cannot be selected because
-  its available names are not known, and recommends citing everything;
+- a non-empty target is always a requested dataset name or study ID; notebook
+  source variables are internal detector output and cannot be selected by the
+  user. If the notebook contains a relevant PyleoTUPS source, the workflow
+  returns a warning explaining that a specific PyleoTUPS study cannot be
+  selected because its available names are not known, and recommends citing
+  everything;
 - a request containing an unsupported PyleoTUPS study target is a no-op: it
   must not remove old generated cells, write the notebook, or inject a new
   retrieval cell. Mixed requests containing that unsupported target also abort

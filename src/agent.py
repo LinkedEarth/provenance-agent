@@ -86,7 +86,8 @@ SYSTEM_PROMPT = (
     "Classify a provenance request for a Jupyter notebook. The request can "
     "concern software, data, both, or be unclear.\n\n"
     "Software means an imported Python library. Data means a dataset or "
-    "dataset variable.\n\n"
+    "study identified by its dataset name or ID; notebook variable names are "
+    "not data targets.\n\n"
     "The notebook path is `{notebook_path}`.\n\n"
     "For 'cite everything', return action 'cite', scope 'all', and kinds "
     "['software', 'data']. For software-only or data-only requests, return "
@@ -228,10 +229,7 @@ def _resolve_targets(state: dict) -> dict:
         if target_warning:
             return _warning_state(state, target_warning)
         if data_targets is not None:
-            detected_variables = {pair[0].casefold() for pair in detected_pairs}
-            runtime_unverified = any(
-                target.casefold() not in detected_variables for target in data_targets
-            )
+            runtime_unverified = bool(data_targets)
 
     return {
         **state,

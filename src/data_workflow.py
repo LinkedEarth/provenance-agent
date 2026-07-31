@@ -35,9 +35,9 @@ Implementation:
       display of each source's metadata frame.
     - filter_datasets(pairs, tool, variable): retains the legacy variable-level
       filter behavior.
-    - split_targets(pairs, targets): separates detected variable names from
-      unmatched dataSetName filters; unmatched names keep all detected pairs so
-      each retrieval cell can filter its returned metadata.
+    - split_targets(pairs, targets): treats every non-empty target as an exact
+      dataSetName filter and keeps all detected pairs so each retrieval cell
+      can handle that name for its own provider.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names): appends
       the single dataset cell covering every pair to an nbformat notebook node,
       or nothing when pairs is empty. fmt defaults to "bibtex" and accepts "apa"
@@ -268,36 +268,22 @@ def split_targets(
     targets: str | list[str] | None,
 ) -> tuple[list[list[str]], list[str]]:
     """
-    Splits requested targets into variable matches and dataset-name filters.
+    Treats requested targets as dataset names, never notebook variable names.
 
     Args:
         pairs: detected [variable, tool] dataset pairs
-        targets: None, a variable name, a dataSetName, or a list containing
-            either kind of target
+        targets: None, a dataSetName, or a list of dataSetName values
 
     Returns:
-        A tuple of (pairs_to_inject, dataset_names). Exact variable matches
-        select only those pairs when no dataset-name target is present. Any
-        unmatched target is treated as a dataSetName and keeps all detected
-        pairs so each retrieval source can apply its own filter.
+        A tuple of (pairs_to_inject, dataset_names). Every non-empty target is
+        passed to each detected provider as a dataset-name filter. The
+        notebook variable names in ``pairs`` are never user-selectable targets.
     """
     if targets is None or targets == []:
         return list(pairs), []
 
-    requested = [targets] if isinstance(targets, str) else list(targets)
-    variables = {pair[0].casefold(): pair[0] for pair in pairs}
-    variable_targets = {
-        variables[target.casefold()]
-        for target in requested
-        if target.casefold() in variables
-    }
-    dataset_names = [
-        target for target in requested if target.casefold() not in variables
-    ]
-
-    if dataset_names:
-        return list(pairs), dataset_names
-    return [pair for pair in pairs if pair[0] in variable_targets], []
+    dataset_names = [targets] if isinstance(targets, str) else list(targets)
+    return list(pairs), dataset_names
 
 
 def pyleotups_target_warning(
@@ -305,16 +291,17 @@ def pyleotups_target_warning(
     targets: str | list[str] | None,
 ) -> str | None:
     """
-    Returns a warning when a target asks for a specific PyleoTUPS study name.
+    Returns a warning when a specific dataset/study target is requested while
+    a relevant PyleoTUPS source is present.
 
-    PyleoTUPS study names are only available inside the notebook's in-memory
-    provider object, so the workflow cannot select one by a user-supplied name
-    before executing the notebook's existing object. Selecting the detected
-    source variable itself remains supported.
+    PyleoTUPS study names or IDs are only available inside the notebook's
+    in-memory provider object, so the workflow cannot safely select one by a
+    user-supplied dataset name before executing the notebook's existing object.
+    Notebook source variables are internal detector output, not valid targets.
 
     Args:
         pairs: detected [variable, tool] dataset pairs
-        targets: requested source variable names or dataset names
+        targets: requested dataset names or study IDs
 
     Returns:
         a user-facing warning message, or None when the request is supported
@@ -322,17 +309,11 @@ def pyleotups_target_warning(
     if targets is None or targets == []:
         return None
 
-    requested = [targets] if isinstance(targets, str) else list(targets)
-    variables = {pair[0].casefold() for pair in pairs}
-    unmatched = [
-        target for target in requested
-        if target.casefold() not in variables
-    ]
     has_pyleotups = any(
         tool.casefold() == "pyleotups"
         for _, tool in pairs
     )
-    if not unmatched or not has_pyleotups:
+    if not has_pyleotups:
         return None
 
     return (
@@ -401,15 +382,15 @@ def generate_data_workflow(
     Args:
         notebook_path: path to the .ipynb to analyze and modify
         tool: optional tool filter (e.g. "PyLiPD")
-        variable: legacy variable-only filter. Use targets for new callers.
+        variable: deprecated source-variable selector; user-facing targeting
+            must use dataset names through ``targets``
         output_path: where to write the modified notebook (defaults to
             notebook_path, i.e. in place)
         fmt: "bibtex" (default) or "apa" - format for citations in the
             injected cell
-        targets: optional variable names and/or exact dataSetName values;
-            unmatched PyLiPD/LiPDGraph targets are applied inside retrieval
-            cells, while an unmatched target with a PyleoTUPS source warns and
-            performs no write
+        targets: optional exact dataSetName values or study IDs; targeted
+            PyLiPD/LiPDGraph names are applied inside retrieval cells, while a
+            non-empty target with a PyleoTUPS source warns and performs no write
         detected_pairs: optional precomputed detector result used by the LCEL
             agent to avoid running dataset detection twice
 
@@ -419,13 +400,15 @@ def generate_data_workflow(
     from dataset_detection import detect_datasets
     from notebook_parser import read_notebook_code
 
-    if targets is not None and variable is not None:
-        raise ValueError("pass either targets or variable, not both")
+    if variable is not None:
+        raise ValueError(
+            "source-variable targeting is unsupported; pass dataset names via targets"
+        )
 
     code = read_notebook_code(notebook_path)
     detected = detect_datasets(code) if detected_pairs is None else detected_pairs
     scoped_detected = filter_datasets(detected, tool=tool)
-    target = targets if targets is not None else variable
+    target = targets
     target_warning = pyleotups_target_warning(scoped_detected, target)
     if target_warning:
         warnings.warn(target_warning, UserWarning, stacklevel=2)
