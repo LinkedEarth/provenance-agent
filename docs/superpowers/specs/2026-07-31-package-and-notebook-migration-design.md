@@ -4,17 +4,50 @@ This is a future migration specification. It expands the future-work items in
 [`2026-07-31-refactor-plan.md`](./2026-07-31-refactor-plan.md) and is not part
 of the current in-place cleanup.
 
-The migration will turn the repository into an installable Python package,
-move the implementation behind stable package-qualified imports, preserve the
-existing `%load_ext provenance` notebook command, and reorganize notebooks
-without changing dataset-detection behavior or benchmark semantics.
+The migration will turn the repository into an installable local Python
+package for use by Jupyter kernels and future consumers, move the
+implementation behind stable package-qualified imports, preserve the existing
+`%load_ext provenance` notebook command, and eventually reorganize notebooks
+without changing dataset-detection behavior or benchmark semantics. It is not
+a public PyPI release or an application-integration task.
+
+## Overview principles
+
+These principles govern every implementation decision in this migration:
+
+1. **Shortest correct code.** A change is worthwhile only when it removes
+   complexity or fixes a real contract problem. Do not introduce a new module,
+   type, wrapper, or migration layer merely to make the architecture look
+   different.
+2. **Delete rather than preserve dead code.** Remove code that is genuinely
+   unused and has no compatibility value. The retained LLM detector is an
+   explicit exception: it is a documented rollback path, so it must remain
+   deprecated and inactive rather than being treated as dead code. The
+   top-level `provenance.py` extension shim is another explicit exception
+   because `%load_ext provenance` is a permanent public contract.
+3. **Stop when a file is fine.** Do not reopen or reorganize modules whose
+   responsibilities and public behavior are already correct for this scope.
+4. **Preserve behavior and intentional contracts.** Dataset-detection results,
+   workflow behavior, tool invocation, notebook mutation rules, and benchmark
+   semantics remain stable. The intentional migration changes are package-
+   qualified imports, responsibility-based module names, removal of
+   `orchestrator.py`, and notebook path updates.
+5. **Keep one active data-detection path.** Deterministic detection is the
+   production path. The LLM detector is retained only as an explicitly marked
+   fallback and must not be called by normal detection.
+6. **Keep scope isolated.** Do not mix algorithm changes, benchmark-semantic
+   changes, APA rendering changes, or unrelated user-worktree cleanup into this
+   migration. Those belong to separate tasks.
 
 ## Goals
 
 - Install the project and all supported workflow/test dependencies into the
-  `lang` environment with one command: `pip install -e .`.
+  local `lang` environment with one command: `pip install -e .`. This is a
+  local development installation requirement, not a publication requirement.
 - Use `provenance_agent` as the Python import namespace and
   `provenance-agent` as the distribution name.
+- Provide a stable Python package boundary for future consumers without
+  committing to an external application integration.
 - Remove `sys.path.insert(...)` and `sys.path.append(...)` from tests and
   notebook code cells.
 - Give direct functions and LangChain tools one canonical package-qualified
@@ -22,7 +55,8 @@ without changing dataset-detection behavior or benchmark semantics.
 - Preserve `%load_ext provenance` as the notebook-facing extension name.
 - Move the implementation into names that describe its responsibilities:
   `notebook_io`, `citations`, `data`, and `software`.
-- Reorganize notebooks into demos, examples, fixtures, and exploration.
+- Reorganize notebooks into demos, examples, fixtures, and exploration only
+  after the package foundation is stable.
 - Regenerate or remove stale generated provenance cells after the imports move.
 - Keep deterministic dataset detection as the active path and preserve the
   deprecated LLM detector fallback.
@@ -40,6 +74,9 @@ without changing dataset-detection behavior or benchmark semantics.
 - Do not change benchmark scoring, expected datasets, or ground-truth
   semantics. Path-only edits to ground-truth `notebook:` fields are allowed
   when notebooks move.
+- Do not publish the distribution to PyPI as part of this work.
+- Do not integrate with any external application as part of this refactoring.
+- Do not add a standalone CLI as part of this refactoring.
 - Do not delete user-created or untracked files unless separately approved.
 - Do not maintain multiple implementations of the same public operation.
   Temporary migration shims, where explicitly listed below, must contain only
@@ -85,6 +122,13 @@ from provenance_agent.agent import run
 from `provenance_agent`, so importing the direct APIs does not import the
 agent. The package root exports only `cite_data` and `cite_software`.
 
+The layout below is the final target. The package-foundation phase may first
+preserve internal filenames while it establishes the package boundary; the
+responsibility-based renames and `orchestrator.py` removal happen only after
+package imports and direct APIs are verified. Direct `cite_data(...)` use
+inside a local Jupyter kernel remains supported and continues to use the
+package directly.
+
 ## Packaging configuration
 
 Add a `pyproject.toml` with explicit setuptools configuration:
@@ -125,6 +169,11 @@ where = ["src"]
 [tool.setuptools.package-data]
 provenance_agent = ["Citations/**/*"]
 ```
+
+This configuration supports local editable installation and future application
+environments; it does not require a public package release. `environment.yml`,
+if retained for developer setup, may install the editable package as part of
+environment creation, but it does not replace `pyproject.toml`.
 
 The final project metadata must declare all dependencies needed by the package,
 tests, generated retrieval cells, and notebook magic, using their distributable
@@ -168,7 +217,9 @@ editable install and from a working directory outside the repository.
 
 ## Module migration
 
-Perform these moves with imports updated in the same migration change:
+After the package foundation is working, perform these moves with imports
+updated in the same migration change. The initial package installation does
+not depend on completing every rename below.
 
 | Current module | Canonical module | Responsibility |
 |---|---|---|
@@ -240,7 +291,7 @@ forward the existing public magic helpers needed by tests. It must not import
 or duplicate the old implementation.
 
 `provenance_agent.magic` owns the implementation and imports
-`provenance_agent.agent` using package-qualified imports. The package extra
+`provenance_agent.agent` using package-qualified imports. The package
 dependencies supply the IPython requirements.
 
 Acceptance tests must verify both:
@@ -274,6 +325,9 @@ Run package import tests from a temporary working directory so the repository
 root cannot mask missing installation metadata.
 
 ## Notebook organization
+
+Notebook reorganization is a later phase, not a prerequisite for installing
+the package or verifying its direct Python APIs.
 
 Apply the following repository-relative layout. The move table is part of the
 migration and must be used to update path references:
@@ -326,18 +380,21 @@ step because it requires API keys and remote services.
 
 ## Migration phases
 
-### Phase 1: package and resource foundation
+### Phase 1: local package and resource foundation
 
 - Add `pyproject.toml` and package discovery.
 - Move `Citations/` into package resources.
 - Create `provenance_agent/__init__.py` with only the direct function exports.
-- Move modules and convert internal imports to relative imports.
+- Establish package-qualified internal imports while preserving current module
+  filenames where that makes the foundation change smaller.
 - Add the top-level `provenance.py` extension shim.
-- Keep the full test suite green after installation in the `lang` environment.
+- Install with `pip install -e .` and keep the package/direct-API tests green in
+  the `lang` environment.
 
-### Phase 2: canonical API and module migration
+### Phase 2: canonical API and module cleanup
 
 - Move direct functions and tools into `data.py` and `software.py`.
+- Rename the remaining modules to their responsibility-based names.
 - Update agent, tests, documentation, and generated-cell templates.
 - Update all tracked Python imports to canonical package paths.
 - Delete `orchestrator.py` only after no active repository consumer imports it.
@@ -364,7 +421,8 @@ step because it requires API keys and remote services.
 The migration is complete when:
 
 1. `/opt/anaconda3/envs/lang/bin/pip install -e .` succeeds in the `lang`
-   environment and `pip check` is clean.
+   environment and `pip check` is clean; no public package publication is
+   required.
 2. Package imports work from outside the repository root.
 3. `from provenance_agent import cite_data, cite_software` works without
    importing `provenance_agent.agent`.
@@ -400,4 +458,5 @@ The migration is complete when:
   preserve unrelated modified or untracked files.
 
 This migration should be implemented under its own branch and reviewed as a
+pull request before merging.
 separate change from the in-place cleanup.
