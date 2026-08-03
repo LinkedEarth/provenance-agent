@@ -8,7 +8,7 @@ The migration will turn the repository into an installable local Python
 package for use by Jupyter kernels and future consumers, move the
 implementation behind stable package-qualified imports, preserve the existing
 `%load_ext provenance` notebook command, and eventually reorganize notebooks
-without changing dataset-detection behavior or benchmark semantics. It is not
+without changing dataset-detection behavior or ground-truth data. It is not
 a public PyPI release or an application-integration task.
 
 ## Overview principles
@@ -28,14 +28,14 @@ These principles govern every implementation decision in this migration:
 3. **Stop when a file is fine.** Do not reopen or reorganize modules whose
    responsibilities and public behavior are already correct for this scope.
 4. **Preserve behavior and intentional contracts.** Dataset-detection results,
-   workflow behavior, tool invocation, notebook mutation rules, and benchmark
-   semantics remain stable. The intentional migration changes are package-
+   workflow behavior, tool invocation, notebook mutation rules, and
+   ground-truth data remain stable. The intentional migration changes are package-
    qualified imports, responsibility-based module names, removal of
    `orchestrator.py`, and notebook path updates.
 5. **Keep one active data-detection path.** Deterministic detection is the
    production path. The LLM detector is retained only as an explicitly marked
    fallback and must not be called by normal detection.
-6. **Keep scope isolated.** Do not mix algorithm changes, benchmark-semantic
+6. **Keep scope isolated.** Do not mix algorithm changes, ground-truth
    changes, APA rendering changes, or unrelated user-worktree cleanup into this
    migration. Those belong to separate tasks.
 
@@ -72,9 +72,9 @@ These principles govern every implementation decision in this migration:
 - Do not make LLM construction lazy as part of this migration. Importing the
   direct data API must remain independent of the agent, but importing
   `provenance_agent.agent` retains the current agent/LLM behavior.
-- Do not change benchmark scoring, expected datasets, or ground-truth
-  semantics. Path-only edits to ground-truth `notebook:` fields are allowed
-  when notebooks move.
+- Do not change the expected software or dataset entries in
+  `benchmark/ground_truth/*.yml`. Path-only edits to their `notebook:` fields
+  are allowed when notebooks move.
 - Do not publish the distribution to PyPI as part of this work.
 - Do not integrate with any external application as part of this refactoring.
 - Do not add a standalone CLI as part of this refactoring.
@@ -333,10 +333,6 @@ After editable installation, remove all repository-owned `sys.path.insert` and
 - notebook code cells; and
 - generated provenance cells.
 
-The benchmark harness is out of scope. `benchmark/run_benchmark.py` keeps its
-`sys.path.insert` and `tests/test_benchmark.py` keeps its own, because neither
-is a package the migration installs.
-
 The structural scan must parse Python source and notebook code-cell `source`,
 not raw notebook JSON, markdown, or stored output. It must reject old flat
 module imports such as `from bibliography import ...` and
@@ -358,42 +354,16 @@ Flag a module only when it is imported as a top-level absolute name: `Import`
 nodes whose first dotted segment is a retired name, and `ImportFrom` nodes with
 `level == 0` whose first dotted segment is a retired name.
 
-The benchmark is not restructured by this migration: no `benchmark/__init__.py`,
-no pytest `pythonpath` setting, no change to how the runner or its tests are
-imported. It stays a repository-only harness outside the installed
-distribution.
-
-One benchmark change is unavoidable, and skipping it silently breaks scoring.
-`benchmark/run_benchmark.py:207-208` imports the flat modules
-`notebook_parser` and `dataset_detection`. Those names stop existing the moment
-Phase 1 moves the modules into `provenance_agent/`, so the two import lines
-must be updated in the same change:
-
-```python
-# Phase 1
-from provenance_agent.notebook_parser import parse_notebook, read_notebook_code
-from provenance_agent.dataset_detection import detect_datasets
-
-# after the Phase 2 renames
-from provenance_agent.notebook_io import parse_notebook, read_notebook_code
-from provenance_agent.dataset_detection import detect_datasets
-```
-
-Apart from the docstring correction noted below, this is the only edit
-`benchmark/` receives. Do not change scoring, ground truth, LLM trial behavior,
-or the runner's existing `sys.path` handling.
-
-The test suite will not catch a mistake here. Both imports are deferred inside
-`benchmark_notebook`, and `tests/test_benchmark.py` imports only the pure
-scoring helpers, so a stale flat import leaves the suite green and fails only
-when the benchmark actually runs. Verify by invoking the runner directly.
+`benchmark/` contains no Python after the runner's removal, only
+`ground_truth/*.yml`. It is data, not code, so it has no imports to migrate and
+no `sys.path` handling to remove. Phase 3 still updates the `notebook:` paths
+inside those files when notebooks move.
 
 The scan does not inspect prose, so separately audit docstrings and markdown
 for instructions that tell users to add `src/` to `sys.path`. Rewrite those
 instructions to use the editable installation. This includes the former
-`src/provenance.py` documentation, the software workflow documentation, the
-benchmark runner documentation, generated-cell comments, and notebook
-markdown.
+`src/provenance.py` documentation, the software workflow documentation,
+generated-cell comments, and notebook markdown.
 
 Run package import tests from a temporary working directory so the repository
 root cannot mask missing installation metadata.
@@ -495,9 +465,8 @@ For each moved notebook:
   surviving API.
 
 The newly added notebooks, both the instruction bundles and
-`02a-query_lipd_graph.ipynb`, do not currently have benchmark ground-truth
-files. Do not add them to the benchmark as part of this organization change;
-preserve benchmark scope and semantics.
+`02a-query_lipd_graph.ipynb`, do not have ground-truth files. Do not add any
+as part of this organization change.
 
 The test suite hardcodes notebook paths that this move table invalidates. These
 references are known at planning time and must be updated in the same change as
@@ -525,19 +494,22 @@ step because it requires API keys and remote services.
 
 ### Phase 0: preconditions
 
-This migration does not start until the working tree is clean of in-flight work
-on the files it moves. Two conditions must hold before Phase 1 begins.
+This migration runs after the terminal-dataframe detection work in
+[`2026-08-03-terminal-dataframe-detection-design.md`](./2026-08-03-terminal-dataframe-detection-design.md),
+not alongside it. One condition must hold before Phase 1 begins.
 
 Deterministic-detection changes must be finished and committed. That work is an
 algorithm change and is out of scope here by the non-goals above, but
 `src/deterministic_dataset_detection.py` is a Phase 1 move target, so carrying
 uncommitted edits into the move mixes an algorithm diff with a rename diff and
-makes both harder to review or revert.
+makes both harder to review or revert. `tests/test_deterministic_dataset_detection.py`
+is edited by both tasks, the detection task changing cases and Phase 3
+rewriting its two `paleoPCA` notebook paths, which is a second reason to let
+detection settle first.
 
-The benchmark baseline must be re-established after those changes land. Phase 4
-compares benchmark results against a baseline, and acceptance criterion 9
-compares detector behavior against a starting point; both are meaningless if
-detection is still moving. Record the post-change baseline before Phase 1.
+There is no benchmark precondition. The runner has been deleted, so detection
+behavior is verified by the test suite alone and this migration has no scores
+to hold steady.
 
 ### Phase 1: local package and resource foundation
 
@@ -579,9 +551,6 @@ detection is still moving. Record the post-change baseline before Phase 1.
 - Update agent, tests, documentation, and any remaining generated-cell
   references after the renames.
 - Update all tracked Python imports to canonical package paths.
-- Update the two deferred imports in `benchmark/run_benchmark.py` to the
-  post-rename package paths. Leave the rest of `benchmark/` alone, including its
-  `sys.path` handling, scoring, ground truth, and LLM trial behavior.
 - Rewrite stale path/setup instructions in source docstrings and active
   documentation. Update `README.md` with the Python prerequisite,
   `pip install -e ".[dev]"`, direct API, and `%load_ext provenance` workflow.
@@ -608,7 +577,8 @@ detection is still moving. Record the post-change baseline before Phase 1.
 - Run the pip dry-run/dependency check before installation so Conda-managed
   paleoclimate packages are not unexpectedly altered.
 - Run the full test suite and package smoke tests.
-- Run benchmark scoring tests without changing their semantics.
+- Confirm `benchmark/ground_truth/*.yml` still resolves every `notebook:` path
+  after the Phase 3 moves. There is nothing to score; the files are data only.
 - Have Brian manually run the demo notebooks that require API keys or remote
   retrieval.
 
@@ -626,28 +596,27 @@ The migration is complete when:
    silently ignored `fmt`.
 5. `%load_ext provenance` still registers the magic.
 6. No active source, test, or notebook code cell contains a `sys.path`
-   mutation. The benchmark harness is exempt and keeps its existing handling.
-7. No active source, test, notebook code cell, or benchmark code imports
-   retired flat module names (`notebook_parser`, `bibliography`,
-   `software_workflow`, `data_workflow`, `dataset_detection`,
-   `deterministic_dataset_detection`, `orchestrator`, `agent`, or `llm`); only
-   the intentional top-level `provenance` extension shim is allowed. The
-   benchmark is exempt from criterion 6 but not from this one: its two deferred
-   imports must name package-qualified modules.
+   mutation.
+7. No active source, test, or notebook code cell imports retired flat module
+   names (`notebook_parser`, `bibliography`, `software_workflow`,
+   `data_workflow`, `dataset_detection`, `deterministic_dataset_detection`,
+   `orchestrator`, `agent`, or `llm`); only the intentional top-level
+   `provenance` extension shim is allowed.
 8. Citation lookup works using packaged `Citations/` resources from outside
    the repository.
 9. Deterministic detector results, diagnostics, deprecated LLM helper tests,
    and PyleoTUPS no-op warning behavior are unchanged. "Unchanged" means
-   identical to the Phase 0 committed baseline, not to any earlier state; this
-   migration must not alter detection, but it also does not roll back detection
-   work that landed before it started.
+   identical to the Phase 0 state: run the detector over a fixed set of
+   notebooks before and after the migration change and require the same output.
+   This migration must not alter detection, and it must not roll back detection
+   work that landed before Phase 0.
 10. Notebook paths, test fixture path constants, and path-only ground-truth
     references all resolve; no repository file references a pre-move
     `notebooks/` path.
 11. The editable install does not unexpectedly change Conda-managed
     paleoclimate package versions.
-12. The full test suite passes, with no benchmark scoring or ground-truth
-    semantics changed; active documentation no longer instructs users to add
+12. The full test suite passes, with no ground-truth entries changed beyond
+    notebook paths; active documentation no longer instructs users to add
     `src/` to `sys.path`.
 
 ## Risks and safeguards
@@ -672,7 +641,7 @@ The migration is complete when:
 - **Magic regression:** install and test the top-level `provenance.py` shim
   separately from the package implementation.
 - **Stale setup documentation:** audit `README.md`, `CLAUDE.md`, source
-  docstrings, benchmark documentation, generated-cell comments, and notebook
+  docstrings, generated-cell comments, and notebook
   markdown for obsolete flat-import or `src/` path instructions.
 - **User worktree damage:** operate only on tracked migration targets and
   preserve unrelated modified or untracked files.
