@@ -83,9 +83,28 @@ def _read_citation_resource(name: str) -> str | None:
         return handle.read()
 
 
+_INDEX_RESOURCE = "library_citations.yml"
+
+
 def load_citation_index() -> dict:
-    """Loads library_citations.yml mapping library names to BibTeX keys."""
-    return yaml.safe_load(_read_citation_resource("library_citations.yml"))
+    """
+    Loads library_citations.yml mapping library names to BibTeX keys.
+
+    Returns:
+        the parsed index
+
+    Raises:
+        FileNotFoundError: if the packaged index is missing, which means the
+            build dropped the Citations/ package data rather than that a
+            library has no citation
+    """
+    text = _read_citation_resource(_INDEX_RESOURCE)
+    if text is None:
+        raise FileNotFoundError(
+            f"provenance_agent ships no Citations/{_INDEX_RESOURCE}; "
+            "the package data is missing from this installation"
+        )
+    return yaml.safe_load(text)
 
 
 def is_stdlib(library: str) -> bool:

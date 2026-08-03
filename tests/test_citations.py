@@ -13,6 +13,7 @@ generate_bibliography.
 """
 
 import nbformat
+import pytest
 
 from provenance_agent import citations
 from provenance_agent.citations import collect_library_entries
@@ -145,3 +146,11 @@ def test_stdlib_does_not_crowd_out_real_citations():
     assert set(df["library"]) == {"pyleoclim"}
 
 
+
+
+def test_missing_package_data_names_the_missing_resource(monkeypatch):
+    """A packaging regression must not surface as an opaque AttributeError."""
+    monkeypatch.setattr(citations, "_read_citation_resource", lambda name: None)
+
+    with pytest.raises(FileNotFoundError, match="library_citations.yml"):
+        citations.load_citation_index()
