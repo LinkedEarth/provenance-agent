@@ -479,12 +479,18 @@ the moves:
 | `tests/test_notebook_parser.py:32` (`MAGIC_NB`) | `notebooks/test_magic_commands.ipynb` | `notebooks/fixtures/test_magic_commands.ipynb` |
 | `tests/test_deterministic_dataset_detection.py` (`paleoPCAlite` case) | `notebooks/testing/paleoPCAlite.ipynb` | `notebooks/examples/paleoPCAlite.ipynb` |
 | `tests/test_deterministic_dataset_detection.py` (`paleoPCA` case) | `notebooks/testing/paleoPCA.ipynb` | `notebooks/examples/paleoPCA.ipynb` |
+| `tests/test_deterministic_dataset_detection.py` (02a fixture case) | `notebooks/testing/02a-query_lipd_graph.ipynb` | `notebooks/examples/02a-query_lipd_graph.ipynb` |
+| `tests/test_software_workflow.py` (`SAMPLE`) | `notebooks/sample.ipynb` | `notebooks/fixtures/sample.ipynb` |
 
-`tests/test_software_workflow.py` reads the same `sample.ipynb` fixture, and
-`tests/test_notebook_parser.py` describes both fixtures in its module docstring;
-update those with the constants. Re-scan for hardcoded `notebooks/` paths across
-`tests/`, `src/`, and `benchmark/` after the moves rather than relying on this
-table alone.
+`tests/test_notebook_parser.py` also names both fixtures in its module
+docstring; update that prose alongside its constants. Re-scan `tests/`, `src/`,
+and `benchmark/` after the moves rather than relying on this table alone.
+
+Do not run that re-scan as a grep for `notebooks/`. Half these constants are
+built with `os.path.join(os.path.dirname(__file__), "..", "notebooks", "x.ipynb")`,
+where the directory is a separate string argument and the substring
+`notebooks/` never appears. Search for the notebook basenames instead, or for
+the string `notebooks` on its own, and expect both spellings.
 
 Do not execute remote retrieval or analysis while rewriting notebooks. Use
 `nbformat` and source-level transformations. Demo execution remains a manual
@@ -504,8 +510,13 @@ algorithm change and is out of scope here by the non-goals above, but
 uncommitted edits into the move mixes an algorithm diff with a rename diff and
 makes both harder to review or revert. `tests/test_deterministic_dataset_detection.py`
 is edited by both tasks, the detection task changing cases and Phase 3
-rewriting its two `paleoPCA` notebook paths, which is a second reason to let
+rewriting the three notebook paths it hardcodes, which is a second reason to let
 detection settle first.
+
+This condition is currently satisfied: the leaf-selection, live-binding, and
+PyLiPD `get_timeseries` work is committed and the suite is green. Re-check it
+rather than assuming, since further detection work may land before Phase 1
+starts.
 
 There is no benchmark precondition. The runner has been deleted, so detection
 behavior is verified by the test suite alone and this migration has no scores
