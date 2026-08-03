@@ -36,7 +36,7 @@ import pytest
 
 from provenance_agent import cite_software
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
+SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
 
 
 def _write_lipdgraph_notebook(path):

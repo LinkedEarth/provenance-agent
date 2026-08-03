@@ -1,4 +1,4 @@
-notebook: notebooks/testing/dataset_pipeline.ipynb
+notebook: notebooks/exploration/dataset_pipeline.ipynb
 software:
   - bibliography
   - notebook_parser

@@ -1,4 +1,4 @@
-notebook: notebooks/C02_b_DA_with_individual_seasonality.ipynb
+notebook: notebooks/examples/C02_b_DA_with_individual_seasonality.ipynb
 software:
   - cfr
   - numpy

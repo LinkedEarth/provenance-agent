@@ -1,4 +1,4 @@
-notebook: notebooks/testing/LIPD.ipynb
+notebook: notebooks/exploration/LIPD.ipynb
 software:
   - pandas
   - pylipd

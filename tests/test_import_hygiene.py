@@ -10,10 +10,10 @@ Purpose:
     either into a red test.
 
 Implementation:
-    Every tracked Python file is parsed with `ast` and walked once.
-    `_retired_import_violations` inspects Import/ImportFrom nodes;
-    `_sys_path_violations` inspects Call/Assign/AugAssign nodes. Both report
-    `path:line` strings so a failure names the offending line directly.
+    Every tracked Python file and every notebook code cell is parsed with `ast`
+    and walked once. `_retired_import_violations` inspects Import/ImportFrom
+    nodes; `_sys_path_violations` inspects Call/Assign/AugAssign nodes. Both
+    report `label:line` strings so a failure names the offending line directly.
 
 Design decisions:
     - The scan matches on the module name the AST resolved, never on a
@@ -34,14 +34,31 @@ Design decisions:
     - Only mutations of sys.path are flagged, not every mention of it. Reading
       sys.path is legitimate; rebinding, assigning into, or calling
       insert/append/extend on it is what this rule is about.
+    - Notebooks are read through nbformat and scanned cell by cell, on the
+      `source` of code cells only. Markdown and stored output are prose and are
+      not scanned, so a historical explanation naming an old module is allowed
+      to stay historical.
+    - Cell sources go through `strip_ipython_directives` first and, when the
+      cleaned cell still does not parse, through a line-by-line recovery pass.
+      Both are necessary. A cell holding `%provenance cite the software` cleans
+      to the bare words `cite the software`, which is not Python, and a research
+      notebook routinely contains a cell that simply does not parse - without
+      recovery, an import sitting in either cell would be invisible to this scan
+      rather than caught by it.
 """
 
 import ast
+import warnings
 from pathlib import Path
+
+import nbformat
+
+from provenance_agent.notebook_io import strip_ipython_directives
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SCANNED_DIRECTORIES = ("src", "tests")
+NOTEBOOK_DIRECTORY = "notebooks"
 
 # Module names that no longer exist at the top level. Importing any of them
 # without a package qualifier means the file predates the package migration.
@@ -72,6 +89,72 @@ def _python_sources() -> list[tuple[str, str]]:
         for path in sorted((REPO_ROOT / directory).rglob("*.py")):
             sources.append((str(path.relative_to(REPO_ROOT)), path.read_text()))
     return sources
+
+
+def _notebook_sources() -> list[tuple[str, str]]:
+    """
+    Collects every notebook code cell, with IPython directives stripped.
+
+    Markdown cells and stored outputs are deliberately excluded: they are prose,
+    and a historical explanation naming a retired module is not a violation.
+
+    Returns:
+        ("path:cell N", cleaned source) pairs, sorted by path then cell index
+    """
+    sources = []
+    for path in sorted((REPO_ROOT / NOTEBOOK_DIRECTORY).rglob("*.ipynb")):
+        notebook = nbformat.read(str(path), as_version=4)
+        label_path = path.relative_to(REPO_ROOT)
+        for index, cell in enumerate(notebook.cells):
+            if cell.cell_type != "code":
+                continue
+            sources.append(
+                (f"{label_path}:cell {index}", strip_ipython_directives(cell.source))
+            )
+    return sources
+
+
+def _all_sources() -> list[tuple[str, str]]:
+    """Returns every scanned source: Python files first, then notebook cells."""
+    return _python_sources() + _notebook_sources()
+
+
+def _parse(source: str) -> ast.Module | None:
+    """Parses source, returning None when it is not valid Python."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            return ast.parse(source)
+    except SyntaxError:
+        return None
+
+
+def _nodes_with_lines(source: str):
+    """
+    Yields (node, line number) for every AST node reachable in source.
+
+    Source that does not parse as a whole is retried line by line, so an import
+    sitting in a cell that also contains a bare magic argument or a genuine
+    syntax error is still seen. Line numbers stay 1-based within the source.
+
+    Args:
+        source: Python source text, already stripped of IPython directives
+
+    Yields:
+        (ast.AST, int) pairs
+    """
+    tree = _parse(source)
+    if tree is not None:
+        for node in ast.walk(tree):
+            yield node, getattr(node, "lineno", 0)
+        return
+
+    for offset, line in enumerate(source.splitlines(), start=1):
+        line_tree = _parse(line.strip())
+        if line_tree is None:
+            continue
+        for node in ast.walk(line_tree):
+            yield node, offset
 
 
 def _is_sys_path(node: ast.AST) -> bool:
@@ -127,12 +210,12 @@ def _retired_import_violations(label: str, source: str) -> list[str]:
         "label:line name" strings, one per offending import
     """
     violations = []
-    for node in ast.walk(ast.parse(source)):
+    for node, lineno in _nodes_with_lines(source):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
                 if root in RETIRED_MODULES:
-                    violations.append(f"{label}:{node.lineno} import {alias.name}")
+                    violations.append(f"{label}:{lineno} import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             # level > 0 is a relative import inside the package; its module
             # name is package-internal and not the retired flat name.
@@ -140,7 +223,7 @@ def _retired_import_violations(label: str, source: str) -> list[str]:
                 continue
             root = node.module.split(".")[0]
             if root in RETIRED_MODULES:
-                violations.append(f"{label}:{node.lineno} from {node.module}")
+                violations.append(f"{label}:{lineno} from {node.module}")
     return violations
 
 
@@ -156,28 +239,36 @@ def _sys_path_violations(label: str, source: str) -> list[str]:
         "label:line" strings, one per offending statement
     """
     return [
-        f"{label}:{node.lineno}"
-        for node in ast.walk(ast.parse(source))
+        f"{label}:{lineno}"
+        for node, lineno in _nodes_with_lines(source)
         if _mutates_sys_path(node)
     ]
 
 
-def test_no_source_or_test_imports_a_retired_flat_module():
+def test_nothing_imports_a_retired_flat_module():
     violations = [
         violation
-        for label, source in _python_sources()
+        for label, source in _all_sources()
         for violation in _retired_import_violations(label, source)
     ]
     assert violations == []
 
 
-def test_no_source_or_test_mutates_sys_path():
+def test_nothing_mutates_sys_path():
     violations = [
         violation
-        for label, source in _python_sources()
+        for label, source in _all_sources()
         for violation in _sys_path_violations(label, source)
     ]
     assert violations == []
+
+
+def test_the_scan_actually_reaches_the_notebooks():
+    """Guards the guard: an empty source list would make both scans vacuous."""
+    notebooks = _notebook_sources()
+    assert len(notebooks) > 100
+    assert any(label.startswith("notebooks/demos/") for label, _ in notebooks)
+    assert any(label.startswith("notebooks/instructions/") for label, _ in notebooks)
 
 
 # --- the scan itself ---------------------------------------------------------
@@ -207,3 +298,15 @@ def test_scan_flags_sys_path_mutation_but_not_reading_it():
     assert _sys_path_violations("x.py", "import sys\nsys.path = ['src']") == ["x.py:2"]
     assert _sys_path_violations("x.py", "import sys\nprint(sys.path)") == []
     assert _sys_path_violations("x.py", "import sys\nprint(sys.argv)") == []
+
+
+def test_scan_recovers_imports_from_a_cell_that_does_not_parse():
+    """A notebook cell holding a bare magic argument still gets scanned."""
+    cell = "cite the software\nfrom bibliography import collect\nx = 1"
+    assert _parse(cell) is None
+    assert _retired_import_violations("nb:cell 3", cell) == [
+        "nb:cell 3:2 from bibliography"
+    ]
+    assert _sys_path_violations(
+        "nb:cell 3", "cite the software\nimport sys\nsys.path.append('src')"
+    ) == ["nb:cell 3:3"]

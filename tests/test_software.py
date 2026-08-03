@@ -10,7 +10,7 @@ Purpose:
 Implementation:
     build_metadata_cell is a pure string function. inject_metadata_cell operates
     on an in-memory nbformat NotebookNode, so there is no file I/O. The end-to-end
-    test runs fully offline: it reads a real fixture notebook (sample.ipynb) with
+    test runs fully offline: it reads a real fixture notebook (notebooks/fixtures/sample.ipynb) with
     nbformat and writes to a tmp path, so no Gemini or network call happens and the
     fixture is never mutated. The live-kernel execution (the user running the
     injected cell) is out of scope for these tests.
@@ -36,7 +36,7 @@ from provenance_agent.software import (
     inject_metadata_cell,
 )
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
+SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
 
 
 # --- build_metadata_cell -----------------------------------------------------

@@ -8,7 +8,7 @@ Purpose:
 Implementation:
     Unit tests for strip_ipython_directives and extract_libraries operate on raw
     strings with no file I/O. Integration tests for parse_notebook use fixture
-    notebooks from notebooks/: sample.ipynb (normal notebook) and
+    notebooks from notebooks/fixtures/: sample.ipynb (normal notebook) and
     test_magic_commands.ipynb (cells with %, !, and %% directives).
 
 Design Decisions:
@@ -25,8 +25,8 @@ import pytest
 
 from provenance_agent.notebook_io import extract_libraries, parse_notebook, strip_ipython_directives
 
-SAMPLE     = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
-MAGIC_NB   = os.path.join(os.path.dirname(__file__), "..", "notebooks", "test_magic_commands.ipynb")
+SAMPLE     = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
+MAGIC_NB   = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "test_magic_commands.ipynb")
 
 
 # ---------------------------------------------------------------------------

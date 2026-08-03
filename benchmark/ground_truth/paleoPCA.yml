@@ -1,4 +1,4 @@
-notebook: notebooks/testing/paleoPCA.ipynb
+notebook: notebooks/examples/paleoPCA.ipynb
 software:
   - ast
   - cartopy
