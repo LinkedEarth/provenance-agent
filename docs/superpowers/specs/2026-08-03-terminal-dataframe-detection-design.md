@@ -285,11 +285,11 @@ rows marked as expected-to-change may change.
 |---|---|---|
 | `notebooks/testing/02a-query_lipd_graph.ipynb` | `df_search`, `sparql_results_1767729896_fbfadce4_unique_TSiD`, `sparql_results_1767730535_65f2d398`, all `LiPDGraph` | no |
 | `notebooks/Graph.ipynb` | `[['df_filt', 'LiPDGraph']]` | no |
-| `notebooks/testing/LIPD.ipynb` | `[['ts_list', 'PyLiPD'], ['df_cut', 'PyLiPD'], ['df_essential', 'PyLiPD'], ['df_merged', 'PyLiPD'], ['df_temp', 'PyLiPD'], ['df_filt', 'PyLiPD']]` | yes |
+| `notebooks/testing/LIPD.ipynb` [^ts] | `[['ts_list', 'PyLiPD'], ['df_cut', 'PyLiPD'], ['df_essential', 'PyLiPD'], ['df_merged', 'PyLiPD'], ['df_temp', 'PyLiPD'], ['df_filt', 'PyLiPD']]` | yes |
 | `notebooks/testing/PyleoTUPS.ipynb` | `[['dfs', 'PyleoTUPS']]` | no |
 | `notebooks/testing/paleoPCA.ipynb` | `[['filtered_df2', 'LiPDGraph'], ['ds_geo', 'xarray']]` | no |
 | `notebooks/testing/paleoPCAlite.ipynb` | `[['filtered_df2', 'LiPDGraph']]` | no |
-| `notebooks/testing/Instruction Notebooks/Notebook1/notebook1.ipynb` | `[['df1', 'LiPDGraph'], ['df_data', 'PyleoTUPS'], ['ts_list', 'PyLiPD'], ['df3', 'PyLiPD']]` | yes |
+| `notebooks/testing/Instruction Notebooks/Notebook1/notebook1.ipynb` [^ts] | `[['df1', 'LiPDGraph'], ['df_data', 'PyleoTUPS'], ['ts_list', 'PyLiPD'], ['df3', 'PyLiPD']]` | yes |
 | `notebooks/testing/Instruction Notebooks/Notebook2/notebook2.ipynb` | `[['df', 'PyleoTUPS'], ['df_graph', 'LiPDGraph'], ['df_l', 'PyLiPD']]` | no |
 | `notebooks/testing/Instruction Notebooks/Notebook3/notebook3.ipynb` | `[['df_data', 'PyleoTUPS'], ['df', 'PyLiPD'], ['df_graph', 'LiPDGraph']]` | no |
 | `notebooks/testing/Instruction Notebooks/Notebook4/notebook4.ipynb` | `[['D_ice', 'LiPDGraph'], ['dsp', 'PyleoTUPS'], ['D', 'PyLiPD']]` | no |
@@ -300,6 +300,17 @@ Every other tracked notebook returns `[]` and must continue to: the five
 `provenance_magic.ipynb`, `sample.ipynb`, `test_magic_commands.ipynb`,
 `testing/data_workflow.ipynb`, `testing/dataset_pipeline.ipynb`,
 `testing/test1.ipynb`, and `workflow.ipynb`.
+
+[^ts]: The `ts_list` entry in these two rows is a recorded observation, not a
+validated expectation. Both notebooks bind it through
+`ts_list, df = D.get_timeseries(names, to_dataframe=True)`. With that flag
+PyLiPD returns `(timeseries_dict, dataframe)`, so `df` holds the DataFrame and
+`ts_list` holds a dict. Typing is applied at the call level, so both unpacked
+names inherit the table kind and the dict is what gets cited. Because the pair
+drives a `{var}.{method}` retrieval cell, these two rows would inject a cell
+against a dict. Distinguishing tuple elements is a separate follow-up; until it
+lands, treat these entries as pinning current behavior rather than correct
+behavior, and do not cite them as evidence that the detector is right here.
 
 Two rows intentionally change under the leaf rule. `LIPD.ipynb` and
 `Instruction Notebooks/Notebook1/notebook1.ipynb` each contain several
