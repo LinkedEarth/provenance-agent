@@ -14,10 +14,10 @@ and agent stack that was added after `main` remained at `68a6f05`:
   returning citation text;
 - software injects one self-displaying `provenance_software` DataFrame cell;
 - data injects one `provenance_datasets` cell containing one retrieval fragment
-  per detected dataset and a final concatenation/display step. The current
-  working-tree direction makes that metadata DataFrame the cell's only visible
-  output; each fragment still leaves its raw `_bib_{variable}` value bound in
-  the kernel;
+  per detected dataset and a final concatenation/display step. The cell's
+  visible and returned runtime result is the source metadata DataFrame from
+  the BibTeX retrieval (`get_bibtex()`/`get_publications()`); each fragment
+  still leaves its raw `_bib_{variable}` value bound in the kernel;
 - there is no new combined `provenance_bibliography` cell;
 - each workflow removes its own prior generated cell before injecting a new one,
   and removes legacy combine cells for migration compatibility;
@@ -71,12 +71,16 @@ not a reason to preserve stale flat imports or the retired combine-cell layout.
   `9e40140`, not from `main` at `68a6f05`. Any local notebook or scratch changes
   are preserved and reviewed separately before staging.
 - Output contract: preserve two independent workflow cells. There is no target
-  combined bibliography frame. The data cell's visible output is the source
-  metadata DataFrame; raw BibTeX remains available through the per-variable
-  `_bib_*` bindings. A data retrieval failure stops the single data cell, which
-  is the accepted tradeoff for one stable cell per workflow. The current
-  `fmt` parameter remains in the compatibility surface until its removal or
-  replacement is explicitly handled in Phase 2.
+  combined bibliography frame. The data cell's visible/returned runtime result
+  is the source metadata DataFrame returned alongside the BibTeX payload; raw
+  BibTeX remains available through the per-variable `_bib_*` bindings but is
+  not printed by the default path. BibTeX is the default at the user-facing
+  `RouteDecision`, `cite_data`, and StructuredTool boundaries. The accepted
+  `fmt` compatibility parameter is currently output-neutral in the
+  DataFrame-only cell; its removal or replacement, including any future APA
+  representation, is explicitly handled in Phase 2. A data retrieval failure
+  stops the single data cell, which is the accepted tradeoff for one stable
+  cell per workflow.
 - LLM behavior: make the Gemini client lazy, but keep the model, temperature,
   and response normalization unchanged.
 - Notebooks: keep every real notebook (including `LIPD.ipynb`,
@@ -85,9 +89,10 @@ not a reason to preserve stale flat imports or the retired combine-cell layout.
   heavy fixtures (`C02_b`, `comparing-*/`) as examples. Generated notebook
   output is not a canonical fixture.
 - Dataset API shapes: PyLiPD returns `(list[str], DataFrame)` while PyleoTUPS
-  returns `(BibliographyData, DataFrame)`. Retrieval code must normalize only
-  the citation text needed for printing/APA rendering and preserve each
-  library's metadata DataFrame shape.
+  returns `(BibliographyData, DataFrame)`. Retrieval code preserves the source
+  metadata DataFrame shape for `provenance_datasets` and keeps the citation
+  payload bound for optional downstream use; the current BibTeX output path
+  does not stringify it for printing or render it to APA.
 
 ## Target `src/provenance_agent/` package (was flat `src/`)
 
@@ -137,10 +142,8 @@ there is no separate top-level `tools.py`. The generated cells retain the
 current contract:
 
 - the software cell binds and displays `provenance_software`;
-- the data cell contains all detected retrieval fragments, prints BibTeX or APA
-  once in the committed baseline, while the current working-tree direction
-  removes that print and displays only the concatenated source metadata frames
-  as `provenance_datasets`; and
+- the data cell contains all detected retrieval fragments and displays only the
+  concatenated source metadata frames as `provenance_datasets`; and
 - no workflow creates or depends on `provenance_bibliography`.
 
 No import cycles:
@@ -225,16 +228,15 @@ filtering, legacy combine-cell removal, idempotent workflow replacement, and
 final-cell presence verification. The committed suite reports 159 passing
 tests.
 
-The working tree also contains a pending `data_workflow.py` edit that removes
-the data cell's raw BibTeX/APA print and makes `provenance_datasets` the only
-visible result. If that direction is intended, stabilize it and add its tests
-before Phase 1; do not silently mix an untested output-contract change into a
-packaging-only commit. The roadmap below treats DataFrame-only output as the
-desired target while retaining the current `fmt` compatibility surface until
-Phase 2 makes the API decision explicit. At review time, the full suite reports
-155 passing and 5 failing tests; all 5 failures assert the committed
-BibTeX/APA-printing behavior and are the explicit stabilization work for this
-pending change.
+The working tree contains the intended `data_workflow.py` direction: raw
+BibTeX/APA printing is removed and `provenance_datasets` is the only visible
+data-cell result. Stabilize this contract and add its tests before Phase 1; do
+not silently mix an untested output-contract change into a packaging-only
+commit. The `fmt` compatibility surface remains accepted but output-neutral
+until Phase 2 makes its replacement/removal decision explicit. At review time,
+the full suite reports 155 passing and 5 failing tests; those failures assert
+the superseded BibTeX/APA-printing behavior and are the explicit stabilization
+work for this direction.
 
 Before starting Phase 1, preserve any local notebook/editor changes, finalize
 the pending data-cell decision, and ensure the refactor branch is based on
@@ -245,8 +247,9 @@ generated notebook output as a new API requirement.
 
 The foundation. Detailed below. The two-cell injection contract, idempotent
 replacement, generated-cell filtering, and agent verification are part of the
-behavior to preserve. The DataFrame-only data-cell output must be stabilized
-and tested before this phase is considered behavior-preserving.
+behavior to preserve. The DataFrame-only data-cell output, BibTeX defaults, and
+compatibility behavior must be stabilized and tested before this phase is
+considered behavior-preserving.
 
 ### Phase 2 - Typed domain & unified result (intentional API change)
 

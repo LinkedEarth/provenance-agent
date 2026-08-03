@@ -42,8 +42,9 @@ These principles govern every implementation decision in this migration:
 ## Goals
 
 - Install the project and all supported workflow/test dependencies into the
-  local `lang` environment with one command: `pip install -e .`. This is a
-  local development installation requirement, not a publication requirement.
+  local `lang` environment with one command: `pip install -e ".[dev]"`. This
+  is a local development installation requirement, not a publication
+  requirement.
 - Use `provenance_agent` as the Python import namespace and
   `provenance-agent` as the distribution name.
 - Provide a stable Python package boundary for future consumers without
@@ -129,6 +130,12 @@ package imports and direct APIs are verified. Direct `cite_data(...)` use
 inside a local Jupyter kernel remains supported and continues to use the
 package directly.
 
+During Phase 1, the package may temporarily contain the current internal names
+`notebook_parser.py`, `bibliography.py`, `data_workflow.py`,
+`software_workflow.py`, and `orchestrator.py`. These are package-internal names
+only, not compatibility modules at the old top level. Phase 2 renames the first
+four to the final names shown above and deletes `orchestrator.py`.
+
 ## Packaging configuration
 
 Add a `pyproject.toml` with explicit setuptools configuration:
@@ -156,6 +163,10 @@ dependencies = [
   "ipynbname",
   "pylipd",
   "pyleotups",
+]
+
+[project.optional-dependencies]
+dev = [
   "pytest",
 ]
 
@@ -170,38 +181,41 @@ where = ["src"]
 provenance_agent = ["Citations/**/*"]
 ```
 
-This configuration supports local editable installation and future application
-environments; it does not require a public package release. `environment.yml`,
-if retained for developer setup, may install the editable package as part of
-environment creation, but it does not replace `pyproject.toml`.
+This configuration supports local editable installation and future environments;
+it does not require a public package release. The development installation
+`pip install -e ".[dev]"` covers the provenance package, test tooling, notebook
+magic, and dependencies required by generated citation cells. The base package
+dependencies in `[project].dependencies` are the canonical list; `pytest` is
+development-only and belongs in the `dev` extra.
 
-The final project metadata must declare all dependencies needed by the package,
-tests, generated retrieval cells, and notebook magic, using their distributable
-names:
-
-- `nbformat`;
-- `bibtexparser`;
-- `PyYAML`;
-- `pandas`;
-- `requests`;
-- `python-dotenv`;
-- `langchain-core`;
-- `langchain-google-genai`; and
-- `pydantic`;
-- `ipython`;
-- `ipynbname`;
-- `pylipd`;
-- `pyleotups`; and
-- `pytest`.
-
-`pylipd` and `pyleotups` are needed by generated cells in the target notebook
-kernel, not by static package import, but they are included in the single
-installation for a predictable supported environment.
+The package installation does not attempt to install every scientific library
+that an arbitrary user notebook might analyze. Notebook analysis libraries
+beyond the generated retrieval-cell dependencies, such as `pyleoclim`,
+`xarray`, and `eofs`, remain dependencies of the notebook's own kernel and are
+out of scope for the package's one-command install. `pylipd` and `pyleotups`
+remain package dependencies because generated retrieval cells require them in
+the supported target-notebook environment.
 
 The local `src/.env` file remains developer configuration and must not be
 packaged or committed. Installed use relies on environment variables or a
 user-provided dotenv file. Add a packaging test that confirms no secret file is
 included in the build artifact.
+
+The migrated `provenance_agent.llm` must not keep the current
+`__file__`-relative dotenv lookup. Use a working-directory-first lookup and a
+source-tree fallback so both installed use and the existing checkout work:
+
+```python
+dotenv_path = find_dotenv(usecwd=True) or find_dotenv()
+if dotenv_path:
+    load_dotenv(dotenv_path)
+```
+
+The working-directory lookup supports a user-provided `.env` when the package
+is installed; the fallback continues to discover the existing `src/.env`
+during the migration. Update `.gitignore` to ignore both `.env` and `src/.env`,
+and keep environment variables higher priority than dotenv values. Do not move
+credentials into the installed package.
 
 ## Citation data resources
 
@@ -209,11 +223,14 @@ The root `Citations/` directory cannot remain an uninstalled runtime
 dependency. Move it under `src/provenance_agent/Citations/` and include its
 files as package data.
 
-Update `citations.py` to resolve the directory with
+Update the current bibliography implementation before its Phase 2 rename to
+resolve the directory with
 `importlib.resources.files("provenance_agent").joinpath("Citations")` rather
-than walking from `__file__` to the repository root. The lookup and DataFrame
-results must remain unchanged. Tests must exercise citation lookup after an
-editable install and from a working directory outside the repository.
+than walking from `__file__` to the repository root. Read resource files through
+the `Traversable` API (`open()` or `as_file()`), not by passing the resource
+object to `os.path.join`. The lookup and DataFrame results must remain
+unchanged. Tests must exercise citation lookup after an editable install and
+from a working directory outside the repository.
 
 ## Module migration
 
@@ -287,18 +304,20 @@ The user-facing command remains:
 
 The installed top-level `provenance.py` shim must expose
 `load_ipython_extension` and delegate to `provenance_agent.magic`. It may also
-forward the existing public magic helpers needed by tests. It must not import
-or duplicate the old implementation.
+forward these existing public names so the magic API remains stable:
+`cite`, `set_notebook_path`, `resolve_notebook_path`, and
+`ProvenanceMagics`. It must not import or duplicate the old implementation.
 
 `provenance_agent.magic` owns the implementation and imports
 `provenance_agent.agent` using package-qualified imports. The package
 dependencies supply the IPython requirements.
 
-Acceptance tests must verify both:
+Acceptance tests must verify:
 
-1. `import provenance` succeeds after editable installation; and
+1. `import provenance` succeeds after editable installation;
 2. a fake IPython shell can register the magic through
-   `provenance.load_ipython_extension(shell)`.
+   `provenance.load_ipython_extension(shell)`; and
+3. the forwarded helper names and `ProvenanceMagics` methods remain available.
 
 Do not change the notebook command to `%load_ext provenance_agent.magic` unless
 a later, separately approved API decision chooses to migrate the extension
@@ -311,15 +330,70 @@ After editable installation, remove all repository-owned `sys.path.insert` and
 
 - tests;
 - source modules;
-- benchmark imports if they are touched solely to use the installed package;
 - notebook code cells; and
 - generated provenance cells.
+
+The benchmark harness is out of scope. `benchmark/run_benchmark.py` keeps its
+`sys.path.insert` and `tests/test_benchmark.py` keeps its own, because neither
+is a package the migration installs.
 
 The structural scan must parse Python source and notebook code-cell `source`,
 not raw notebook JSON, markdown, or stored output. It must reject old flat
 module imports such as `from bibliography import ...` and
 `from data_workflow import ...`, while allowing historical prose and the
 intentional top-level `provenance` shim.
+
+The scan must match on the fully resolved absolute module name from the AST,
+never on a substring of the source text. Two of the retired names survive as
+package-internal modules, so a naive scan produces false positives on correct
+code:
+
+- relative imports inside the package parse as
+  `ImportFrom(module="dataset_detection", level=1)`, and the scan must skip any
+  node with `level > 0` rather than matching `node.module` alone; and
+- `from provenance_agent.dataset_detection import ...` contains a retired name
+  as a substring but is the canonical form.
+
+Flag a module only when it is imported as a top-level absolute name: `Import`
+nodes whose first dotted segment is a retired name, and `ImportFrom` nodes with
+`level == 0` whose first dotted segment is a retired name.
+
+The benchmark is not restructured by this migration: no `benchmark/__init__.py`,
+no pytest `pythonpath` setting, no change to how the runner or its tests are
+imported. It stays a repository-only harness outside the installed
+distribution.
+
+One benchmark change is unavoidable, and skipping it silently breaks scoring.
+`benchmark/run_benchmark.py:207-208` imports the flat modules
+`notebook_parser` and `dataset_detection`. Those names stop existing the moment
+Phase 1 moves the modules into `provenance_agent/`, so the two import lines
+must be updated in the same change:
+
+```python
+# Phase 1
+from provenance_agent.notebook_parser import parse_notebook, read_notebook_code
+from provenance_agent.dataset_detection import detect_datasets
+
+# after the Phase 2 renames
+from provenance_agent.notebook_io import parse_notebook, read_notebook_code
+from provenance_agent.dataset_detection import detect_datasets
+```
+
+Apart from the docstring correction noted below, this is the only edit
+`benchmark/` receives. Do not change scoring, ground truth, LLM trial behavior,
+or the runner's existing `sys.path` handling.
+
+The test suite will not catch a mistake here. Both imports are deferred inside
+`benchmark_notebook`, and `tests/test_benchmark.py` imports only the pure
+scoring helpers, so a stale flat import leaves the suite green and fails only
+when the benchmark actually runs. Verify by invoking the runner directly.
+
+The scan does not inspect prose, so separately audit docstrings and markdown
+for instructions that tell users to add `src/` to `sys.path`. Rewrite those
+instructions to use the editable installation. This includes the former
+`src/provenance.py` documentation, the software workflow documentation, the
+benchmark runner documentation, generated-cell comments, and notebook
+markdown.
 
 Run package import tests from a temporary working directory so the repository
 root cannot mask missing installation metadata.
@@ -332,6 +406,23 @@ the package or verifying its direct Python APIs.
 Apply the following repository-relative layout. The move table is part of the
 migration and must be used to update path references:
 
+The new files currently located under `notebooks/testing/` are organized by
+purpose: `02a-query_lipd_graph.ipynb` is a curated LiPDGraph tutorial and moves
+with the examples, while the four `Instruction Notebooks/NotebookN` bundles
+become a separate instruction/evaluation collection. Each instruction bundle
+keeps its local `.lpd` file beside its notebook so the exercise remains
+self-contained; those files are not flattened into the shared fixtures.
+
+The tutorial and instruction bundles are committed migration targets. Preserve
+their committed content while moving them in Phase 3, and do not mix unrelated
+notebook edits into the migration change.
+
+Each bundle previously also contained a `notebookN.zip` archive holding a
+duplicate copy of the notebook and its `.lpd`. Those archives have been deleted;
+each bundle now contains one functional notebook and one `.lpd`; ignored
+`.DS_Store` artifacts are excluded from that count. No zip handling is required
+during the move.
+
 ```text
 notebooks/
 ├── demos/
@@ -340,14 +431,29 @@ notebooks/
 │   ├── overall_workflow.ipynb        # notebooks/overall_workflow.ipynb
 │   └── provenance_magic.ipynb        # notebooks/provenance_magic.ipynb
 ├── examples/
+│   ├── 02a-query_lipd_graph.ipynb    # notebooks/testing/02a-query_lipd_graph.ipynb
 │   ├── paleoPCAlite.ipynb            # notebooks/testing/paleoPCAlite.ipynb
 │   ├── paleoPCA.ipynb                # notebooks/testing/paleoPCA.ipynb
 │   ├── C02_b_DA_with_individual_seasonality.ipynb  # notebooks/C02_b_DA_with_individual_seasonality.ipynb
 │   └── comparing-simulated-reconstructed-climate/
+├── instructions/
+│   ├── Notebook1/
+│   │   ├── notebook1.ipynb           # notebooks/testing/Instruction Notebooks/Notebook1/notebook1.ipynb
+│   │   └── MD98_2176.Stott.2007.lpd  # notebooks/testing/Instruction Notebooks/Notebook1/MD98_2176.Stott.2007.lpd
+│   ├── Notebook2/
+│   │   ├── notebook2.ipynb           # notebooks/testing/Instruction Notebooks/Notebook2/notebook2.ipynb
+│   │   └── Vostok.Bazin.2013.lpd     # notebooks/testing/Instruction Notebooks/Notebook2/Vostok.Bazin.2013.lpd
+│   ├── Notebook3/
+│   │   ├── notebook3.ipynb           # notebooks/testing/Instruction Notebooks/Notebook3/notebook3.ipynb
+│   │   └── Ng.EW9209-1JPC.2018.lpd   # notebooks/testing/Instruction Notebooks/Notebook3/Ng.EW9209-1JPC.2018.lpd
+│   └── Notebook4/
+│       ├── notebook4.ipynb           # notebooks/testing/Instruction Notebooks/Notebook4/notebook4.ipynb
+│       └── Botuvera.Brazil.2005.lpd  # notebooks/testing/Instruction Notebooks/Notebook4/Botuvera.Brazil.2005.lpd
 ├── fixtures/
 │   ├── sample.ipynb                  # notebooks/sample.ipynb
 │   ├── test_magic_commands.ipynb     # notebooks/test_magic_commands.ipynb
 │   ├── Pages2k/*.lpd                 # notebooks/testing/Pages2k/*.lpd
+│   ├── Ocn-Palmyra.Nurhati.2011.lpd  # notebooks/testing/Ocn-Palmyra.Nurhati.2011.lpd
 │   └── mybiblio.bib                  # notebooks/testing/mybiblio.bib
 └── exploration/
     ├── LIPD.ipynb                    # notebooks/testing/LIPD.ipynb
@@ -359,12 +465,26 @@ notebooks/
 
 The existing `comparing-simulated-reconstructed-climate/` directory moves
 under `notebooks/examples/` without changing its internal notebook names.
+The `Instruction Notebooks/` parent directory is replaced by
+`notebooks/instructions/`; preserve each `NotebookN/` bundle and its filenames.
+After all listed files and directories have moved, including the newly added
+tutorial and instruction bundles, remove the now-empty `notebooks/testing/`
+directory; do not leave a second fixture or instruction location.
 
 For each moved notebook:
 
 - update package imports and all relative fixture paths;
+- preserve the instruction bundles as self-contained units, and verify rather
+  than rewrite their sibling `.lpd` references. Each bundle moves intact and the
+  notebooks load their data by bare sibling name (`data_path =
+  'MD98_2176.Stott.2007.lpd'`, `lipd.load('Vostok.Bazin.2013.lpd')`,
+  `D.load('./Botuvera.Brazil.2005.lpd')`), so those paths stay correct after the
+  move and editing them would break them;
 - update `benchmark/ground_truth/*.yml` `notebook:` paths when applicable,
   without changing expected software or dataset entries;
+- update every repository file that hardcodes the notebook's path, which
+  includes test fixture constants as well as ground truth (see the table
+  below);
 - clear stale generated provenance cells whose imports name deleted modules;
 - regenerate canonical generated cells with the new package imports where the
   notebook is intended to demonstrate the workflow;
@@ -374,29 +494,99 @@ For each moved notebook:
   by the current cleanup, in which case rewrite the explanation against the
   surviving API.
 
+The newly added notebooks, both the instruction bundles and
+`02a-query_lipd_graph.ipynb`, do not currently have benchmark ground-truth
+files. Do not add them to the benchmark as part of this organization change;
+preserve benchmark scope and semantics.
+
+The test suite hardcodes notebook paths that this move table invalidates. These
+references are known at planning time and must be updated in the same change as
+the moves:
+
+| Reference | Current path | New path |
+|---|---|---|
+| `tests/test_agent.py:23` (`SAMPLE`) | `notebooks/sample.ipynb` | `notebooks/fixtures/sample.ipynb` |
+| `tests/test_notebook_parser.py:31` (`SAMPLE`) | `notebooks/sample.ipynb` | `notebooks/fixtures/sample.ipynb` |
+| `tests/test_notebook_parser.py:32` (`MAGIC_NB`) | `notebooks/test_magic_commands.ipynb` | `notebooks/fixtures/test_magic_commands.ipynb` |
+| `tests/test_deterministic_dataset_detection.py` (`paleoPCAlite` case) | `notebooks/testing/paleoPCAlite.ipynb` | `notebooks/examples/paleoPCAlite.ipynb` |
+| `tests/test_deterministic_dataset_detection.py` (`paleoPCA` case) | `notebooks/testing/paleoPCA.ipynb` | `notebooks/examples/paleoPCA.ipynb` |
+
+`tests/test_software_workflow.py` reads the same `sample.ipynb` fixture, and
+`tests/test_notebook_parser.py` describes both fixtures in its module docstring;
+update those with the constants. Re-scan for hardcoded `notebooks/` paths across
+`tests/`, `src/`, and `benchmark/` after the moves rather than relying on this
+table alone.
+
 Do not execute remote retrieval or analysis while rewriting notebooks. Use
 `nbformat` and source-level transformations. Demo execution remains a manual
 step because it requires API keys and remote services.
 
 ## Migration phases
 
+### Phase 0: preconditions
+
+This migration does not start until the working tree is clean of in-flight work
+on the files it moves. Two conditions must hold before Phase 1 begins.
+
+Deterministic-detection changes must be finished and committed. That work is an
+algorithm change and is out of scope here by the non-goals above, but
+`src/deterministic_dataset_detection.py` is a Phase 1 move target, so carrying
+uncommitted edits into the move mixes an algorithm diff with a rename diff and
+makes both harder to review or revert.
+
+The benchmark baseline must be re-established after those changes land. Phase 4
+compares benchmark results against a baseline, and acceptance criterion 9
+compares detector behavior against a starting point; both are meaningless if
+detection is still moving. Record the post-change baseline before Phase 1.
+
 ### Phase 1: local package and resource foundation
 
 - Add `pyproject.toml` and package discovery.
+- Update `.gitignore` for `.env` and `src/.env`. Before installing into the
+  existing `lang` environment, perform the required pip dry-run and
+  dependency-gap check.
 - Move `Citations/` into package resources.
-- Create `provenance_agent/__init__.py` with only the direct function exports.
-- Establish package-qualified internal imports while preserving current module
-  filenames where that makes the foundation change smaller.
-- Add the top-level `provenance.py` extension shim.
-- Install with `pip install -e .` and keep the package/direct-API tests green in
-  the `lang` environment.
+- Create `provenance_agent/__init__.py` with only the direct function exports,
+  temporarily importing those functions from `.orchestrator`.
+- Move the current source modules, except the magic entry point, into
+  `provenance_agent/` under their current internal filenames, remove the old
+  top-level copies, and use package-qualified internal imports. Do not add
+  compatibility shims for those old module names.
+- Keep `orchestrator.py` temporarily as the internal
+  `provenance_agent.orchestrator` implementation so the package root can
+  re-export the direct functions; remove it after Phase 2 moves that logic into
+  `data.py` and `software.py`.
+- Update the current bibliography implementation to use packaged citation
+  resources and add its outside-the-repository lookup test.
+- Move the current LLM implementation's dotenv loading to the explicit
+  `find_dotenv(usecwd=True)` plus fallback strategy. Test that the existing
+  checkout credential location and an installed working-directory `.env` are
+  both discoverable without packaging either secret file.
+- Update generated-cell templates and their tests to use the Phase 1 package
+  names, such as `from provenance_agent.bibliography import ...`.
+- Before installing the shim, move the current implementation in
+  `src/provenance.py` into `provenance_agent/magic.py` and update its imports;
+  then replace `src/provenance.py` with the forwarding shim. Both the target
+  module and the shim are Phase 1 deliverables, so the shim never points at a
+  module that is deferred to Phase 2.
+- Install with `pip install -e ".[dev]"` and keep the package/direct-API tests
+  green in the `lang` environment.
 
 ### Phase 2: canonical API and module cleanup
 
 - Move direct functions and tools into `data.py` and `software.py`.
 - Rename the remaining modules to their responsibility-based names.
-- Update agent, tests, documentation, and generated-cell templates.
+- Update agent, tests, documentation, and any remaining generated-cell
+  references after the renames.
 - Update all tracked Python imports to canonical package paths.
+- Update the two deferred imports in `benchmark/run_benchmark.py` to the
+  post-rename package paths. Leave the rest of `benchmark/` alone, including its
+  `sys.path` handling, scoring, ground truth, and LLM trial behavior.
+- Rewrite stale path/setup instructions in source docstrings and active
+  documentation. Update `README.md` with the Python prerequisite,
+  `pip install -e ".[dev]"`, direct API, and `%load_ext provenance` workflow.
+  Update `CLAUDE.md` so it describes the package-qualified layout and imports
+  while preserving the required `lang` interpreter instruction.
 - Delete `orchestrator.py` only after no active repository consumer imports it.
 - Add structural import and direct/tool invocation tests.
 
@@ -406,11 +596,17 @@ step because it requires API keys and remote services.
 - Rewrite package imports and relative paths.
 - Clear or regenerate stale generated cells.
 - Update path-only ground-truth references.
+- Update the hardcoded notebook paths in `tests/` listed in the test-reference
+  table, then re-scan `tests/`, `src/`, and `benchmark/` for any remaining
+  hardcoded `notebooks/` path.
 - Run notebook JSON structural validation without executing remote cells.
 
 ### Phase 4: verification and handoff
 
-- Install from a temporary working directory using the `lang` environment.
+- Install from a temporary working directory using the `lang` environment and
+  `pip install -e ".[dev]"`.
+- Run the pip dry-run/dependency check before installation so Conda-managed
+  paleoclimate packages are not unexpectedly altered.
 - Run the full test suite and package smoke tests.
 - Run benchmark scoring tests without changing their semantics.
 - Have Brian manually run the demo notebooks that require API keys or remote
@@ -420,30 +616,51 @@ step because it requires API keys and remote services.
 
 The migration is complete when:
 
-1. `/opt/anaconda3/envs/lang/bin/pip install -e .` succeeds in the `lang`
-   environment and `pip check` is clean; no public package publication is
-   required.
+1. `/opt/anaconda3/envs/lang/bin/pip install -e ".[dev]"` succeeds in the
+   `lang` environment and `pip check` is clean; no public package publication
+   is required.
 2. Package imports work from outside the repository root.
 3. `from provenance_agent import cite_data, cite_software` works without
    importing `provenance_agent.agent`.
 4. The canonical direct and tool APIs work with the existing signatures and
    silently ignored `fmt`.
 5. `%load_ext provenance` still registers the magic.
-6. No active source, test, or notebook code cell contains a `sys.path` mutation.
-7. No active source, test, or notebook code cell imports retired flat module
-   names.
+6. No active source, test, or notebook code cell contains a `sys.path`
+   mutation. The benchmark harness is exempt and keeps its existing handling.
+7. No active source, test, notebook code cell, or benchmark code imports
+   retired flat module names (`notebook_parser`, `bibliography`,
+   `software_workflow`, `data_workflow`, `dataset_detection`,
+   `deterministic_dataset_detection`, `orchestrator`, `agent`, or `llm`); only
+   the intentional top-level `provenance` extension shim is allowed. The
+   benchmark is exempt from criterion 6 but not from this one: its two deferred
+   imports must name package-qualified modules.
 8. Citation lookup works using packaged `Citations/` resources from outside
    the repository.
 9. Deterministic detector results, diagnostics, deprecated LLM helper tests,
-   and PyleoTUPS no-op warning behavior are unchanged.
-10. Notebook paths and path-only ground-truth references resolve.
-11. The full test suite passes, with no benchmark scoring or ground-truth
-    semantics changed.
+   and PyleoTUPS no-op warning behavior are unchanged. "Unchanged" means
+   identical to the Phase 0 committed baseline, not to any earlier state; this
+   migration must not alter detection, but it also does not roll back detection
+   work that landed before it started.
+10. Notebook paths, test fixture path constants, and path-only ground-truth
+    references all resolve; no repository file references a pre-move
+    `notebooks/` path.
+11. The editable install does not unexpectedly change Conda-managed
+    paleoclimate package versions.
+12. The full test suite passes, with no benchmark scoring or ground-truth
+    semantics changed; active documentation no longer instructs users to add
+    `src/` to `sys.path`.
 
 ## Risks and safeguards
 
 - **Package data omission:** test citation lookup from outside the checkout and
   inspect the built artifact for `Citations/` files.
+- **Credential lookup regression:** test the cwd-first `find_dotenv` behavior
+  with the existing `src/.env` checkout file and with an installed-package
+  working-directory `.env`; ensure neither file is included in the artifact.
+- **Conda/pip dependency conflict:** run `pip install --dry-run -e ".[dev]"`
+  before installation. If pip proposes changing Conda-managed paleoclimate
+  packages, manually verify the already-installed dependency set and use
+  `pip install --no-deps -e ".[dev]"`, followed by `pip check`.
 - **Import cycles:** keep `__init__.py` limited to direct workflow functions;
   test importing `provenance_agent` before importing `agent`.
 - **Stale generated cells:** structurally scan and clear/regenerate cells before
@@ -454,9 +671,11 @@ The migration is complete when:
   import scan is clean; document the migration in active documentation.
 - **Magic regression:** install and test the top-level `provenance.py` shim
   separately from the package implementation.
+- **Stale setup documentation:** audit `README.md`, `CLAUDE.md`, source
+  docstrings, benchmark documentation, generated-cell comments, and notebook
+  markdown for obsolete flat-import or `src/` path instructions.
 - **User worktree damage:** operate only on tracked migration targets and
   preserve unrelated modified or untracked files.
 
-This migration should be implemented under its own branch and reviewed as a
-pull request before merging.
-separate change from the in-place cleanup.
+Implement this migration under its own branch. Review it as a pull request
+before merging, and keep it separate from the in-place cleanup.
