@@ -124,6 +124,78 @@ display(final)
     assert detect_datasets_in_notebook(str(notebook)) == [["final", "pandas"]]
 
 
+def test_parallel_terminal_tables_report_all_leaves(tmp_path):
+    notebook = tmp_path / "parallel_tables.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+warm = raw[raw["temperature"] > 0]
+cold = raw[raw["temperature"] < 0]
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["warm", "pandas"],
+        ["cold", "pandas"],
+    ]
+
+
+def test_dead_terminal_table_binding_is_not_reported(tmp_path):
+    notebook = tmp_path / "dead_table.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+df = pd.read_csv("records.csv")
+df = 42
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
+def test_live_terminal_tables_from_branch_and_loop_are_reported(tmp_path):
+    notebook = tmp_path / "live_branch_tables.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+if True:
+    branch_df = pd.read_csv("branch.csv")
+
+for filename in ["loop.csv"]:
+    loop_df = pd.read_csv(filename)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["branch_df", "pandas"],
+        ["loop_df", "pandas"],
+    ]
+
+
+def test_analyzed_source_does_not_fallback_to_unused_sibling(tmp_path):
+    notebook = tmp_path / "analyzed_branch_and_sibling.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+used = raw[raw["used"]]
+unused = raw[raw["unused"]]
+fit = SomeModel().fit(used)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["used", "pandas"]]
+
+
 def test_terminal_fallback_is_per_source_alongside_resolved_analysis(tmp_path):
     notebook = tmp_path / "mixed_sources.ipynb"
     _write_notebook(
@@ -278,6 +350,28 @@ result = series.pca()
     assert detect_datasets_in_notebook(str(notebook)) == [["D", "PyLiPD"]]
 
 
+def test_pylipd_get_timeseries_requires_dataframe_flag_for_table_fallback(tmp_path):
+    notebook = tmp_path / "pylipd_timeseries_return_types.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+
+D = LiPD()
+D.load("dataset.lpd")
+default_result = D.get_timeseries(["dataset"])
+disabled_result = D.get_timeseries(["dataset"], to_dataframe=False)
+keyword_frame = D.get_timeseries(["dataset"], to_dataframe=True)
+positional_frame = D.get_timeseries(["dataset"], True)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["keyword_frame", "PyLiPD"],
+        ["positional_frame", "PyLiPD"],
+    ]
+
+
 def test_pyleotups_search_without_analysis_is_omitted(tmp_path):
     notebook = tmp_path / "search_only.ipynb"
     _write_notebook(
@@ -430,4 +524,15 @@ def test_repository_paleo_pca_fixture_reports_both_analysis_sources():
     assert detect_datasets_in_notebook(str(notebook)) == [
         ["filtered_df2", "LiPDGraph"],
         ["ds_geo", "xarray"],
+    ]
+
+
+def test_repository_query_lipd_graph_fixture_reports_each_query_lineage():
+    repository_root = Path(__file__).resolve().parents[1]
+    notebook = repository_root / "notebooks/testing/02a-query_lipd_graph.ipynb"
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["df_search", "LiPDGraph"],
+        ["sparql_results_1767729896_fbfadce4_unique_TSiD", "LiPDGraph"],
+        ["sparql_results_1767730535_65f2d398", "LiPDGraph"],
     ]

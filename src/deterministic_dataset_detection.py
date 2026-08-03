@@ -3,10 +3,10 @@ Deterministic, source-oriented dataset detection for Jupyter notebooks.
 
 Purpose:
     Identify external dataset sources whose values reach a recognized scientific
-    analysis operation, or whose latest source-backed table is the terminal
-    result for that source when no analysis resolves its lineage. The fallback
-    is therefore per active source, not per notebook. The public entry point
-    accepts only a notebook path and returns the repository's existing
+    analysis operation, or whose live terminal source-backed table leaves are
+    the results for that source when no analysis resolves its lineage. The
+    fallback is therefore per active source, not per notebook. The public entry
+    point accepts only a notebook path and returns the repository's existing
     list-of-pairs contract, such as [["filtered_df2", "LiPDGraph"]].
 
 Implementation:
@@ -24,7 +24,7 @@ Design decisions:
       dynamic imports do not create guessed source lineage.
     - Source objects are not reported merely because they were loaded or
       searched. Their lineage must reach a configured analysis sink or produce
-      a source-backed terminal table/DataFrame.
+      one or more live source-backed terminal table/DataFrame leaves.
     - Terminal fallback is deliberately tabular: it considers source-backed
       pandas tables/DataFrames, while xarray sources still require a recognized
       analysis boundary.
@@ -246,8 +246,8 @@ _PANDAS_TABLE_FUNCTIONS = frozenset({
 #    become sinks, even when they receive a source-backed value.
 # 5. For each sink, walk dependencies backward and choose a stable boundary:
 #    the latest table, xarray, or source-object value for each source group.
-# 6. For each active source without a resolved analysis sink, choose the latest
-#    source-backed table/DataFrame as a terminal result.
+# 6. For each active source without a resolved analysis sink, choose every live
+#    source-backed table/DataFrame leaf as a terminal result.
 # 7. Deduplicate pairs and sort them by source position and variable name.
 
 
@@ -407,6 +407,14 @@ def _has_explicit_pyleotups_identifier(node: ast.Call) -> bool:
         ):
             return True
     return bool(node.args and _constant_value(node.args[0]) is not None)
+
+
+def _pylipd_get_timeseries_returns_dataframe(node: ast.Call) -> bool:
+    """Reports whether a PyLiPD timeseries call requests dataframe output."""
+    for keyword in node.keywords:
+        if keyword.arg == "to_dataframe":
+            return _constant_value(keyword.value) is True
+    return len(node.args) > 1 and _constant_value(node.args[1]) is True
 
 
 def _choose_family(evals: Iterable[_Eval], fallback: str = "unknown") -> str:
@@ -1229,6 +1237,28 @@ class _NotebookGraph(ast.NodeVisitor):
             return _Eval(deps=combined.deps, family="citation", kind="citation")
 
         if receiver.source_ids and method in _PYLEO_DATA_METHODS:
+            is_pylipd = any(
+                self.sources.get(source_id) is not None
+                and self.sources[source_id].tool == "PyLiPD"
+                for source_id in receiver.source_ids
+            )
+            # PyLiPD's get_timeseries defaults to a dictionary of timeseries
+            # objects. Only a statically true to_dataframe flag produces the
+            # table fallback; otherwise preserve lineage without claiming a
+            # dataframe result.
+            if (
+                is_pylipd
+                and method == "get_timeseries"
+                and not _pylipd_get_timeseries_returns_dataframe(node)
+            ):
+                evaluation = _Eval(
+                    deps=combined.deps,
+                    source_ids=combined.source_ids,
+                    family="pyleo",
+                    kind="timeseries",
+                )
+                self._record_sink(name, evaluation, node)
+                return evaluation
             family = "table" if method != "get_datasets" else "collection"
             kind = "table" if family == "table" else "list"
             evaluation = _Eval(
@@ -1353,16 +1383,31 @@ class _NotebookGraph(ast.NodeVisitor):
             return None
         return max(candidates, key=lambda value: value.order)
 
-    def _terminal_table_for_source(self, source: _Source) -> _Value | None:
-        """Selects the latest source-backed table when no analysis resolves it."""
+    def _terminal_tables_for_source(self, source: _Source) -> list[_Value]:
+        """Returns live terminal table leaves for an unresolved source."""
         candidates = [
             value
             for value in self.values.values()
-            if source.source_id in value.source_ids and value.kind == "table"
+            if (
+                source.source_id in value.source_ids
+                and value.kind == "table"
+                and value.name is not None
+                and self.env.get(value.name) is value
+            )
         ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda value: value.order)
+        ancestors = {
+            ancestor_id
+            for value in candidates
+            for ancestor_id in self._closure(value.deps)
+        }
+        return sorted(
+            (
+                value
+                for value in candidates
+                if value.value_id not in ancestors
+            ),
+            key=lambda value: value.order,
+        )
 
     def _sink_is_resolved(self, sink: _Sink) -> bool:
         """Reports whether a sink reaches a usable recognized source boundary."""
@@ -1449,14 +1494,14 @@ class _NotebookGraph(ast.NodeVisitor):
         for source in sorted(self.sources.values(), key=lambda item: item.order):
             if not source.active or source.source_id in resolved_source_ids:
                 continue
-            candidate = self._terminal_table_for_source(source)
-            if candidate is None or candidate.name is None:
-                continue
-            pair = (candidate.name, source.tool)
-            position = (source.order, candidate.order)
-            previous = pairs.get(pair)
-            if previous is None or position < previous:
-                pairs[pair] = position
+            for candidate in self._terminal_tables_for_source(source):
+                if candidate.name is None:
+                    continue
+                pair = (candidate.name, source.tool)
+                position = (source.order, candidate.order)
+                previous = pairs.get(pair)
+                if previous is None or position < previous:
+                    pairs[pair] = position
 
         ordered = sorted(
             pairs.items(),
