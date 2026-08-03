@@ -3,10 +3,11 @@ Deterministic, source-oriented dataset detection for Jupyter notebooks.
 
 Purpose:
     Identify external dataset sources whose values reach a recognized scientific
-    analysis operation, or whose latest source-backed table is the notebook's
-    terminal result when no analysis is present. The public entry point accepts
-    only a notebook path and returns the repository's existing list-of-pairs
-    contract, such as [["filtered_df2", "LiPDGraph"]].
+    analysis operation, or whose latest source-backed table is the terminal
+    result for that source when no analysis resolves its lineage. The fallback
+    is therefore per active source, not per notebook. The public entry point
+    accepts only a notebook path and returns the repository's existing
+    list-of-pairs contract, such as [["filtered_df2", "LiPDGraph"]].
 
 Implementation:
     The scanner parses code cells in notebook order and builds a small,
@@ -24,6 +25,12 @@ Design decisions:
     - Source objects are not reported merely because they were loaded or
       searched. Their lineage must reach a configured analysis sink or produce
       a source-backed terminal table/DataFrame.
+    - Terminal fallback is deliberately tabular: it considers source-backed
+      pandas tables/DataFrames, while xarray sources still require a recognized
+      analysis boundary.
+    - Terminal fallback is evaluated independently for each active source, so
+      an unrelated source-backed table can be reported alongside an analyzed
+      source. This preserves one result per independent query lineage.
     - Analysis calls without resolvable source lineage are retained as
       diagnostics, so an empty pair list can be distinguished from an
       analysis that may use an unsupported loader.
@@ -239,7 +246,7 @@ _PANDAS_TABLE_FUNCTIONS = frozenset({
 #    become sinks, even when they receive a source-backed value.
 # 5. For each sink, walk dependencies backward and choose a stable boundary:
 #    the latest table, xarray, or source-object value for each source group.
-# 6. For active sources without a resolved analysis sink, choose the latest
+# 6. For each active source without a resolved analysis sink, choose the latest
 #    source-backed table/DataFrame as a terminal result.
 # 7. Deduplicate pairs and sort them by source position and variable name.
 
@@ -349,18 +356,17 @@ def _constant_value(node: ast.AST) -> Any:
 
 
 def _is_pandas_dataframe_constructor(name: str) -> bool:
-    """Reports whether a callable is a pandas DataFrame constructor."""
-    return _last_name(name).casefold() == "dataframe" and (
-        name.casefold().startswith(("pd.", "pandas."))
-        or "." not in name
+    """Reports whether a qualified callable is a pandas DataFrame constructor."""
+    return _last_name(name).casefold() == "dataframe" and name.casefold().startswith(
+        ("pd.", "pandas.")
     )
 
 
 def _is_pandas_table_function(name: str) -> bool:
-    """Reports whether a pandas function combines source-backed tables."""
-    return _last_name(name).casefold() in _PANDAS_TABLE_FUNCTIONS and (
-        name.casefold().startswith(("pd.", "pandas."))
-        or "." not in name
+    """Reports whether a qualified pandas function combines source-backed tables."""
+    return (
+        _last_name(name).casefold() in _PANDAS_TABLE_FUNCTIONS
+        and name.casefold().startswith(("pd.", "pandas."))
     )
 
 
@@ -1431,10 +1437,10 @@ class _NotebookGraph(ast.NodeVisitor):
                 candidate = self._candidate_for_source(source, sink, closure)
                 if candidate is None:
                     continue
-                resolved_source_ids.add(source_id)
                 pair = (candidate.name, source.tool)
                 if pair[0] is None:
                     continue
+                resolved_source_ids.add(source_id)
                 position = (source.order, candidate.order)
                 previous = pairs.get(pair)
                 if previous is None or position < previous:

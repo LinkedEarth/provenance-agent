@@ -124,6 +124,60 @@ display(final)
     assert detect_datasets_in_notebook(str(notebook)) == [["final", "pandas"]]
 
 
+def test_terminal_fallback_is_per_source_alongside_resolved_analysis(tmp_path):
+    notebook = tmp_path / "mixed_sources.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+import xarray as xr
+
+main = xr.open_dataset("main.nc")
+solver = Eof(main)
+scratch = pd.read_csv("lookup.csv")
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["main", "xarray"],
+        ["scratch", "pandas"],
+    ]
+
+
+def test_bare_merge_does_not_promote_a_pylipd_source(tmp_path):
+    notebook = tmp_path / "bare_merge.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+from mylib import merge
+
+D = LiPD()
+D.load("x.lpd")
+out = merge(D, 1)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
+def test_bare_dataframe_does_not_promote_a_pylipd_source(tmp_path):
+    notebook = tmp_path / "bare_dataframe.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+from someorm import DataFrame
+
+D = LiPD()
+D.load("x.lpd")
+out = DataFrame(D)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
 def test_sparql_dataframe_helpers_produce_one_result_per_query(tmp_path):
     notebook = tmp_path / "sparql_helpers.ipynb"
     _write_notebook(

@@ -2,10 +2,10 @@
 Dataset detection facade for the data workflow.
 
 Purpose:
-    Identify which notebook variables hold the datasets actually used for
-    analysis, so the data workflow can inject a retrieval cell ({var}.{method})
-    for each. The active detector is the deterministic, AST/data-flow analyzer
-    in deterministic_dataset_detection.py.
+    Identify which notebook variables hold source-backed datasets used for
+    analysis or terminal tabular results, so the data workflow can inject a
+    retrieval cell ({var}.{method}) for each. The active detector is the
+    deterministic, AST/data-flow analyzer in deterministic_dataset_detection.py.
 
 Implementation:
     - detect_datasets(notebook_path): delegates to the deterministic detector
@@ -134,7 +134,7 @@ def parse_detection_response(text: str) -> list[list[str]]:
 
 def detect_datasets(notebook_path: str) -> list[list[str]]:
     """
-    Detects analysis-used dataset sources in a notebook deterministically.
+    Detects source-backed dataset variables in a notebook deterministically.
 
     Args:
         notebook_path: path to the target .ipynb file
