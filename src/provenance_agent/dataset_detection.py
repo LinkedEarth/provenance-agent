@@ -144,8 +144,8 @@ def detect_datasets(notebook_path: str) -> list[list[str]]:
     """
     # DEPRECATED LLM fallback, retained so the project can switch back. To
     # restore it, read the notebook's code with
-    # notebook_parser.read_notebook_code(notebook_path) and run:
-    # from llm import llm, message_text
+    # .notebook_parser.read_notebook_code(notebook_path) and run:
+    # from .llm import llm, message_text
     # response = llm.invoke(build_detection_prompt(code))
     # return parse_detection_response(message_text(response))
 
@@ -165,7 +165,7 @@ def detect_datasets_with_diagnostics(notebook_path: str) -> dict[str, list]:
     Returns:
         a mapping with ``pairs`` and ``warnings`` keys
     """
-    from deterministic_dataset_detection import detect_datasets_with_diagnostics
+    from .deterministic_dataset_detection import detect_datasets_with_diagnostics
 
     return detect_datasets_with_diagnostics(notebook_path)
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        print("Usage: python dataset_detection.py <path_to_notebook.ipynb>")
+        print("Usage: python -m provenance_agent.dataset_detection <path_to_notebook.ipynb>")
         sys.exit(1)
     for variable, tool in detect_datasets_in_notebook(sys.argv[1]):
         print(f"{variable}\t{tool}")

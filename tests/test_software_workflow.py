@@ -26,14 +26,11 @@ Design Decisions:
 """
 
 import os
-import sys
 
 import nbformat
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from software_workflow import (
+from provenance_agent.software_workflow import (
     build_metadata_cell,
     generate_software_workflow,
     inject_metadata_cell,
@@ -46,7 +43,7 @@ SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipyn
 
 def test_cell_imports_collect_library_entries():
     cell = build_metadata_cell(["pyleoclim", "pandas"])
-    assert "from bibliography import collect_library_entries" in cell
+    assert "from provenance_agent.bibliography import collect_library_entries" in cell
 
 
 def test_cell_bakes_in_the_library_list():

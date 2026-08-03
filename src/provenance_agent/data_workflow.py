@@ -229,7 +229,7 @@ def build_dataset_cell(
     """
     # The marker goes on the cell, not on each retrieval block, since the block
     # is a fragment that never becomes a cell of its own.
-    from notebook_parser import PROVENANCE_CELL_MARKER
+    from .notebook_parser import PROVENANCE_CELL_MARKER
 
     blocks = "".join(
         build_retrieval_cell(variable, tool, endpoint, dataset_names)
@@ -400,8 +400,8 @@ def generate_data_workflow(
     Returns:
         the [variable, tool] pairs that had cells injected
     """
-    from dataset_detection import detect_datasets
-    from notebook_parser import read_notebook_code
+    from .dataset_detection import detect_datasets
+    from .notebook_parser import read_notebook_code
 
     if variable is not None:
         raise ValueError(
@@ -428,7 +428,7 @@ def generate_data_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    from bibliography import (
+    from .bibliography import (
         DATASETS_FRAME,
         remove_legacy_combine_cells,
         remove_provenance_cells,

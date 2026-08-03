@@ -9,6 +9,8 @@ by the data workflow (data_workflow.py), which runs get_bibtex() /
 get_publications() in the notebook's live kernel.
 
 Implementation:
+    - _read_citation_resource(name): reads one file out of the packaged
+      Citations/ directory via importlib.resources.
     - load_citation_index(): loads library_citations.yml (library name -> its
       inline "paper" BibTeX and/or a "software" .bib file).
     - collect_library_entries(libraries, citation_types): merges the matching
@@ -20,6 +22,13 @@ Implementation:
       stacking a second, stale one.
 
 Design decisions:
+    - Citations/ is package data resolved with
+      importlib.resources.files("provenance_agent"), not a directory found by
+      walking up from __file__ to a repository root. The old walk only worked
+      when the code was run out of a source checkout; the resource lookup keeps
+      working from an installed package and from any working directory. The
+      files are read through the returned Traversable's open(), never by
+      handing the resource object to os.path.
     - There is no rendering layer here. APA rendering was removed along with the
       LLM chain that produced it: citations are surfaced as the injected cell's
       DataFrame output, not as assembled text. The data workflow still accepts
@@ -30,8 +39,8 @@ Design decisions:
       bound to. Relocating them is deferred to the module-rename task.
 """
 
-import os
 import sys
+from importlib.resources import files
 
 import bibtexparser
 import pandas as pd
@@ -39,11 +48,11 @@ import yaml
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.bwriter import BibTexWriter
-from notebook_parser import PROVENANCE_CELL_MARKER
+
+from .notebook_parser import PROVENANCE_CELL_MARKER
 
 
 _STDLIB_MODULES = sys.stdlib_module_names
-_CITATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "Citations")
 _DATAFRAME_COLUMNS = [
     "library", "citation_type", "key", "title", "author", "year", "doi", "bibtex", "note",
 ]
@@ -51,11 +60,31 @@ _DATAFRAME_COLUMNS = [
 _NO_CITATION_NOTE = "No citation found for imported library"
 
 
+def _read_citation_resource(name: str) -> str | None:
+    """
+    Reads one file out of the packaged Citations/ directory.
+
+    The directory is resolved with importlib.resources rather than by walking
+    up from __file__, so the lookup works the same whether the package is
+    imported from this checkout or from an installed copy, and whatever the
+    caller's working directory is.
+
+    Args:
+        name: a file name inside Citations/, e.g. "pyleoclim.bib"
+
+    Returns:
+        the file's text, or None when the package ships no such resource
+    """
+    resource = files("provenance_agent").joinpath("Citations").joinpath(name)
+    if not resource.is_file():
+        return None
+    with resource.open() as handle:
+        return handle.read()
+
+
 def load_citation_index() -> dict:
     """Loads library_citations.yml mapping library names to BibTeX keys."""
-    yml_path = os.path.join(_CITATIONS_DIR, "library_citations.yml")
-    with open(yml_path) as f:
-        return yaml.safe_load(f)
+    return yaml.safe_load(_read_citation_resource("library_citations.yml"))
 
 
 def is_stdlib(library: str) -> bool:
@@ -160,10 +189,9 @@ def collect_library_entries(
             _add_entry_row(rows, seen_dois, lib_lower, "paper", entry)
 
         if not citation_types or "software" in citation_types:
-            bib_path = os.path.join(_CITATIONS_DIR, f"{lib_lower}.bib")
-            if os.path.exists(bib_path):
-                with open(bib_path) as f:
-                    entries = bibtexparser.load(f, parser=_bibtex_parser()).entries
+            bib_text = _read_citation_resource(f"{lib_lower}.bib")
+            if bib_text is not None:
+                entries = bibtexparser.loads(bib_text, parser=_bibtex_parser()).entries
                 found_citation = bool(entries) or found_citation
                 for entry in entries:
                     _add_entry_row(rows, seen_dois, lib_lower, "software", entry)

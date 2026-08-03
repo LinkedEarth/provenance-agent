@@ -58,9 +58,9 @@ from langchain_core.runnables import (
 )
 from pydantic import BaseModel, Field
 
-from llm import llm
-from notebook_parser import PROVENANCE_CELL_MARKER
-from orchestrator import (
+from .llm import llm
+from .notebook_parser import PROVENANCE_CELL_MARKER
+from .orchestrator import (
     cite_data,
     cite_data_tool,
     cite_software,
@@ -147,7 +147,7 @@ def build_messages(request: str, notebook_path: str) -> list:
 
 def _prepare_context(state: dict) -> dict:
     """Adds imported library names and a pre-dispatch notebook snapshot."""
-    from notebook_parser import parse_notebook
+    from .notebook_parser import parse_notebook
 
     notebook_path = state["notebook_path"]
     return {
@@ -159,7 +159,7 @@ def _prepare_context(state: dict) -> dict:
 
 def _detect_dataset_pairs(notebook_path: str) -> list[list[str]]:
     """Runs the deterministic dataset detector for a data-bearing request."""
-    from dataset_detection import detect_datasets
+    from .dataset_detection import detect_datasets
 
     return detect_datasets(notebook_path)
 
@@ -229,7 +229,7 @@ def _resolve_targets(state: dict) -> dict:
         detected_pairs = _detect_dataset_pairs(state["notebook_path"])
         if not detected_pairs:
             return _warning_state(state, "No datasets were detected in the notebook.")
-        from data_workflow import pyleotups_target_warning
+        from .data_workflow import pyleotups_target_warning
 
         target_warning = pyleotups_target_warning(
             detected_pairs,
@@ -454,6 +454,6 @@ def run(request: str, notebook_path: str) -> dict:
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print('Usage: python agent.py <notebook.ipynb> "<request>"')
+        print('Usage: python -m provenance_agent.agent <notebook.ipynb> "<request>"')
         sys.exit(1)
     print(json.dumps(run(sys.argv[2], sys.argv[1]), indent=2))

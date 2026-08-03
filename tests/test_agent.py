@@ -12,11 +12,8 @@ import json
 import nbformat
 import os
 import shutil
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-import agent
+from provenance_agent import agent
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 

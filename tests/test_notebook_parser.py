@@ -20,13 +20,10 @@ Design Decisions:
 """
 
 import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from notebook_parser import extract_libraries, parse_notebook, strip_ipython_directives
+from provenance_agent.notebook_parser import extract_libraries, parse_notebook, strip_ipython_directives
 
 SAMPLE     = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
 MAGIC_NB   = os.path.join(os.path.dirname(__file__), "..", "notebooks", "test_magic_commands.ipynb")
@@ -166,7 +163,7 @@ def test_parse_magic_notebook_extracts_imports_despite_magic():
 # --- injected cells are not the notebook's dependencies -----------------------
 
 def test_is_generated_cell_recognizes_marker_and_legacy_signatures():
-    from notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
+    from provenance_agent.notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
 
     assert is_generated_cell(f"{PROVENANCE_CELL_MARKER}\nimport bibliography")
     assert is_generated_cell("_provbib_software = collect_library_entries([], None)")
@@ -182,7 +179,7 @@ def test_parse_notebook_ignores_injected_cells(tmp_path):
     citation on file, so the notebook would gain a citation it never earned.
     """
     import nbformat
-    from notebook_parser import parse_notebook
+    from provenance_agent.notebook_parser import parse_notebook
 
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))
@@ -205,7 +202,7 @@ def test_parse_notebook_ignores_injected_cells(tmp_path):
 def test_read_notebook_code_ignores_injected_cells(tmp_path):
     """The detector must not mistake retrieval scaffolding for a dataset variable."""
     import nbformat
-    from notebook_parser import read_notebook_code
+    from provenance_agent.notebook_parser import read_notebook_code
 
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell("df_res = pd.read_csv(data)"))
@@ -225,9 +222,9 @@ def test_read_notebook_code_ignores_injected_cells(tmp_path):
 
 def test_injected_cells_carry_the_marker():
     """New cells are recognized by the marker, not by inferring their contents."""
-    from notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
-    from software_workflow import build_metadata_cell
-    from data_workflow import build_dataset_cell
+    from provenance_agent.notebook_parser import PROVENANCE_CELL_MARKER, is_generated_cell
+    from provenance_agent.software_workflow import build_metadata_cell
+    from provenance_agent.data_workflow import build_dataset_cell
 
     software = build_metadata_cell(["numpy"])
     # The marker belongs on the injected cell, not on build_retrieval_cell's
@@ -240,7 +237,7 @@ def test_injected_cells_carry_the_marker():
 
 def test_repeated_software_runs_do_not_accumulate_self_citations(tmp_path):
     import nbformat
-    from software_workflow import generate_software_workflow
+    from provenance_agent.software_workflow import generate_software_workflow
 
     nb = nbformat.v4.new_notebook()
     nb.cells.append(nbformat.v4.new_code_cell("import numpy as np"))

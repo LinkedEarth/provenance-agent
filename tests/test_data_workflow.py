@@ -29,16 +29,12 @@ Design Decisions:
     - Unsupported tools raise ValueError rather than silently emitting nothing.
 """
 
-import os
-import sys
 import warnings
 
 import nbformat
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from data_workflow import (
+from provenance_agent.data_workflow import (
     build_retrieval_cell,
     extract_lipdgraph_endpoint,
     filter_datasets,
@@ -208,7 +204,7 @@ def test_split_targets_mixed_targets_keeps_all_for_name_filter():
 def test_pyleotups_target_warns_without_mutating_notebook(
     tmp_path, monkeypatch, target
 ):
-    import dataset_detection
+    from provenance_agent import dataset_detection
 
     monkeypatch.setattr(
         dataset_detection,
@@ -224,7 +220,7 @@ def test_pyleotups_target_warns_without_mutating_notebook(
         nbformat.write(nb, handle)
     before = notebook.read_bytes()
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
 
     with pytest.warns(UserWarning, match="specific PyleoTUPS"):
         pairs = generate_data_workflow(
@@ -237,7 +233,7 @@ def test_pyleotups_target_warns_without_mutating_notebook(
 
 
 def test_pyleotups_all_datasets_request_still_injects(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
 
     monkeypatch.setattr(
         dataset_detection,
@@ -252,7 +248,7 @@ def test_pyleotups_all_datasets_request_still_injects(tmp_path, monkeypatch):
     with open(notebook, "w") as handle:
         nbformat.write(nb, handle)
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
 
     pairs = generate_data_workflow(str(notebook))
 
@@ -262,7 +258,7 @@ def test_pyleotups_all_datasets_request_still_injects(tmp_path, monkeypatch):
 
 
 def test_pyleotups_warning_only_applies_to_requested_tool(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
 
     monkeypatch.setattr(
         dataset_detection,
@@ -277,7 +273,7 @@ def test_pyleotups_warning_only_applies_to_requested_tool(tmp_path, monkeypatch)
     with open(notebook, "w") as handle:
         nbformat.write(nb, handle)
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -296,7 +292,7 @@ def test_filter_by_variable_str_still_works():
 
 
 def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
 
     monkeypatch.setattr(
         dataset_detection,
@@ -314,7 +310,7 @@ def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatc
     with open(source, "w") as f:
         nbformat.write(nb, f)
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
     pairs = generate_data_workflow(
         str(source), targets="tr04evli", output_path=str(output)
     )
@@ -327,7 +323,7 @@ def test_generate_data_workflow_accepts_dataset_name_target(tmp_path, monkeypatc
 
 
 def test_generate_data_workflow_rejects_variable_targets(tmp_path):
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
 
     with pytest.raises(ValueError, match="source-variable targeting"):
         generate_data_workflow(
@@ -396,7 +392,7 @@ def test_multi_dataset_cell_displays_each_metadata_frame_without_concatenating()
 # --- cross-workflow integration -----------------------------------------------
 
 def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda code: [["filtered_df2", "LiPDGraph"]],
@@ -412,8 +408,8 @@ def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
     with open(path, "w") as f:
         nbformat.write(nb, f)
 
-    from software_workflow import generate_software_workflow
-    from data_workflow import generate_data_workflow
+    from provenance_agent.software_workflow import generate_software_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
 
     generate_software_workflow(str(path))
     generate_data_workflow(str(path))
@@ -434,7 +430,7 @@ def test_software_then_data_leaves_one_cell_each(tmp_path, monkeypatch):
 
 def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
     """Notebooks from older runs carry a combine cell nothing manages anymore."""
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda code: [["filtered_df2", "LiPDGraph"]],
@@ -452,7 +448,7 @@ def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
     with open(path, "w") as f:
         nbformat.write(nb, f)
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
     generate_data_workflow(str(path))
 
     final = nbformat.read(str(path), as_version=4)
@@ -466,7 +462,7 @@ def test_legacy_combine_cell_is_stripped(tmp_path, monkeypatch):
 
 def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
     """One dataset cell means one, however many times the workflow runs."""
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda code: [["filtered_df2", "LiPDGraph"]],
@@ -481,7 +477,7 @@ def test_repeated_runs_replace_the_dataset_cell(tmp_path, monkeypatch):
     with open(path, "w") as f:
         nbformat.write(nb, f)
 
-    from data_workflow import generate_data_workflow
+    from provenance_agent.data_workflow import generate_data_workflow
     for _ in range(3):
         generate_data_workflow(str(path))
 

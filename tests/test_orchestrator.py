@@ -9,14 +9,11 @@ acceptance of arbitrary values and identical output across them, not rejection.
 """
 
 import os
-import sys
 import inspect
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from orchestrator import cite_software
+from provenance_agent.orchestrator import cite_software
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
 
@@ -33,7 +30,7 @@ def _write_lipdgraph_notebook(path):
 
 
 def test_format_validation_is_removed():
-    import orchestrator
+    from provenance_agent import orchestrator
 
     assert not hasattr(orchestrator, "_check_fmt")
     assert not hasattr(orchestrator, "_VALID_FMT")
@@ -70,7 +67,7 @@ def test_cite_software_unimported_library_returns_empty(tmp_path):
 
 
 def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda code: [["filtered_df2", "LiPDGraph"]],
@@ -79,7 +76,7 @@ def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
     nb_out = tmp_path / "out.ipynb"
     _write_lipdgraph_notebook(str(nb_in))
 
-    from orchestrator import cite_data
+    from provenance_agent.orchestrator import cite_data
     pairs = cite_data(str(nb_in), fmt="apa", output_path=str(nb_out))
     assert pairs == [["filtered_df2", "LiPDGraph"]]
 
@@ -93,14 +90,14 @@ def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
 
 
 def test_cite_data_defaults_to_bibtex():
-    from orchestrator import _cite_data_tool_entry, cite_data
+    from provenance_agent.orchestrator import _cite_data_tool_entry, cite_data
 
     assert inspect.signature(cite_data).parameters["fmt"].default == "bibtex"
     assert inspect.signature(_cite_data_tool_entry).parameters["fmt"].default == "bibtex"
 
 
 def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
-    import dataset_detection
+    from provenance_agent import dataset_detection
 
     monkeypatch.setattr(
         dataset_detection,
@@ -110,7 +107,7 @@ def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
     notebook = tmp_path / "in.ipynb"
     _write_lipdgraph_notebook(str(notebook))
 
-    from orchestrator import cite_data
+    from provenance_agent.orchestrator import cite_data
     pairs = cite_data(
         str(notebook),
         detected_pairs=[["filtered_df2", "LiPDGraph"]],
@@ -122,13 +119,13 @@ def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
 @pytest.mark.parametrize("fmt", ["bibtex", "apa", "html", "not-a-format"])
 def test_cite_data_accepts_any_fmt_with_identical_output(tmp_path, monkeypatch, fmt):
     """Every fmt value is accepted and produces the same cell as the default."""
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda _path: [["filtered_df2", "LiPDGraph"]],
     )
     import nbformat
-    from orchestrator import cite_data
+    from provenance_agent.orchestrator import cite_data
 
     def inject(suffix, **kwargs):
         nb_in = tmp_path / f"in_{suffix}.ipynb"
@@ -146,7 +143,7 @@ def test_cite_data_accepts_any_fmt_with_identical_output(tmp_path, monkeypatch, 
 
 def test_cite_data_tool_accepts_any_fmt(tmp_path, monkeypatch):
     """The StructuredTool boundary accepts fmt too, so tool callers do not break."""
-    import dataset_detection
+    from provenance_agent import dataset_detection
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
         lambda _path: [["filtered_df2", "LiPDGraph"]],
@@ -154,7 +151,7 @@ def test_cite_data_tool_accepts_any_fmt(tmp_path, monkeypatch):
     notebook = tmp_path / "tool.ipynb"
     _write_lipdgraph_notebook(str(notebook))
 
-    from orchestrator import cite_data_tool
+    from provenance_agent.orchestrator import cite_data_tool
     pairs = cite_data_tool.invoke(
         {"notebook_path": str(notebook), "fmt": "apa"}
     )
@@ -166,8 +163,8 @@ def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatc
     The active data path is deterministic. Detonate the deprecated LLM helpers
     and the shared client: reaching any of them fails the test.
     """
-    import dataset_detection
-    import llm
+    from provenance_agent import dataset_detection
+    from provenance_agent import llm
 
     def detonate(*_args, **_kwargs):
         raise AssertionError("the deprecated LLM detection path was used")
@@ -198,7 +195,7 @@ def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatc
     with open(notebook, "w") as handle:
         nbformat.write(nb, handle)
 
-    from orchestrator import cite_data
+    from provenance_agent.orchestrator import cite_data
     assert cite_data(str(notebook)) == [["D", "PyLiPD"]]
 
 
@@ -207,7 +204,7 @@ def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
     tmp_path, monkeypatch, target
 ):
     """A specific PyleoTUPS study, by numeric ID or name, is a warned no-op."""
-    import dataset_detection
+    from provenance_agent import dataset_detection
     import nbformat
     monkeypatch.setattr(
         dataset_detection, "detect_datasets",
@@ -221,7 +218,7 @@ def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
         nbformat.write(nb, handle)
     before = notebook.read_bytes()
 
-    from orchestrator import cite_data
+    from provenance_agent.orchestrator import cite_data
     with pytest.warns(UserWarning, match="specific PyleoTUPS"):
         pairs = cite_data(str(notebook), targets=target)
 
@@ -231,14 +228,14 @@ def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
 
 def test_tools_are_structured_tools():
     from langchain_core.tools import StructuredTool
-    from orchestrator import cite_software_tool, cite_data_tool
+    from provenance_agent.orchestrator import cite_software_tool, cite_data_tool
     assert isinstance(cite_software_tool, StructuredTool)
     assert isinstance(cite_data_tool, StructuredTool)
     assert "detected_pairs" not in cite_data_tool.args
 
 
 def test_tool_names_and_descriptions():
-    from orchestrator import cite_software_tool, cite_data_tool
+    from provenance_agent.orchestrator import cite_software_tool, cite_data_tool
     assert cite_software_tool.name == "cite_software"
     assert cite_data_tool.name == "cite_data"
     assert "software" in cite_software_tool.description.lower()
@@ -246,7 +243,7 @@ def test_tool_names_and_descriptions():
 
 
 def test_cite_software_tool_invokes(tmp_path):
-    from orchestrator import cite_software_tool
+    from provenance_agent.orchestrator import cite_software_tool
     out = cite_software_tool.invoke(
         {"notebook_path": SAMPLE, "libraries": "pyleoclim",
          "output_path": str(tmp_path / "out.ipynb")}

@@ -3,6 +3,10 @@ __pycache__/
 benchmark/results/
 CLAUDE.md
 .DS_Store
+.env
 src/.env
 .worktrees/
 docs/superpowers/
+build/
+dist/
+*.egg-info/

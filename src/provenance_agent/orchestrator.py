@@ -64,7 +64,7 @@ def cite_software(
         the library names the injected metadata cell was built for (empty when
         nothing matched)
     """
-    from software_workflow import generate_software_workflow
+    from .software_workflow import generate_software_workflow
 
     return generate_software_workflow(
         notebook_path,
@@ -105,7 +105,7 @@ def cite_data(
     Returns:
         the [variable, tool] pairs that had retrieval cells injected
     """
-    from data_workflow import generate_data_workflow
+    from .data_workflow import generate_data_workflow
 
     return generate_data_workflow(
         notebook_path,

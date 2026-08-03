@@ -49,7 +49,7 @@ from typing import Any, Iterable, TypedDict
 
 import nbformat
 
-from notebook_parser import is_generated_cell, strip_ipython_directives
+from .notebook_parser import is_generated_cell, strip_ipython_directives
 
 
 __all__ = (
@@ -1599,7 +1599,10 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        print("Usage: python deterministic_dataset_detection.py <path_to_notebook.ipynb>")
+        print(
+            "Usage: python -m provenance_agent.deterministic_dataset_detection "
+            "<path_to_notebook.ipynb>"
+        )
         sys.exit(1)
     for variable, tool in detect_datasets_in_notebook(sys.argv[1]):
         print(f"{variable}\t{tool}")

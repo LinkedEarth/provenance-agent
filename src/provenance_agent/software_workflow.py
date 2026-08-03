@@ -13,7 +13,8 @@ Purpose:
 Implementation:
     - build_metadata_cell(libraries, citation_types): returns the Python source
       for the injected cell. The cell imports collect_library_entries from
-      bibliography, calls it on the baked-in library list, binds the result to
+      provenance_agent.bibliography, calls it on the baked-in library list,
+      binds the result to
       provenance_software, and display()s it. collect_library_entries parses the
       local Citations/ .bib files with bibtexparser, so the DataFrame columns
       (library, citation_type, key, title, author, year, doi, bibtex, note) are
@@ -26,10 +27,11 @@ Implementation:
       requested libraries, inject the metadata cell, and write the notebook back.
 
 Design decisions:
-    - The cell imports from bibliography rather than baking the collected BibTeX
-      inline, so it stays short and always reflects the current Citations/ data;
-      this means src/ must be on the kernel's sys.path for the import to succeed
-      (the demo notebooks add it).
+    - The cell imports from provenance_agent.bibliography rather than baking the
+      collected BibTeX inline, so it stays short and always reflects the current
+      Citations/ data. The import is package-qualified, so the notebook's kernel
+      only needs the package installed (`pip install -e ".[dev]"`) - no
+      sys.path manipulation in the notebook.
     - One cell for all libraries, because all software citations resolve to a
       single DataFrame - there is no per-library live object to reuse.
     - Citations are surfaced as the injected cell's OUTPUT, not as this module's
@@ -68,14 +70,15 @@ def build_metadata_cell(
         Python source that, run in the notebook's kernel, binds
         provenance_software to a pandas DataFrame of the libraries' citation
         metadata and displays it, so the citations are the cell's output. The
-        cell imports collect_library_entries from bibliography, so src/ must be
-        on the kernel's sys.path.
+        cell imports collect_library_entries from
+        provenance_agent.bibliography, so the package must be installed in the
+        kernel's environment (`pip install -e ".[dev]"`).
     """
-    from notebook_parser import PROVENANCE_CELL_MARKER
+    from .notebook_parser import PROVENANCE_CELL_MARKER
 
     return (
         f"{PROVENANCE_CELL_MARKER}\n"
-        "from bibliography import collect_library_entries\n"
+        "from provenance_agent.bibliography import collect_library_entries\n"
         f"provenance_software = collect_library_entries({libraries!r}, {citation_types!r})\n"
         "display(provenance_software)"
     )
@@ -129,8 +132,8 @@ def generate_software_workflow(
         the library names the metadata cell was built for (empty when nothing
         matched, in which case the notebook is left untouched)
     """
-    from bibliography import is_stdlib
-    from notebook_parser import parse_notebook, validate_libraries
+    from .bibliography import is_stdlib
+    from .notebook_parser import parse_notebook, validate_libraries
 
     # Dropped before the cell is built, so the baked-in library list and the
     # reported result name only libraries someone would actually cite.
@@ -146,7 +149,7 @@ def generate_software_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    from bibliography import (
+    from .bibliography import (
         SOFTWARE_FRAME,
         remove_legacy_combine_cells,
         remove_provenance_cells,

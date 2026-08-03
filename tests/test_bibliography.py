@@ -12,15 +12,10 @@ render_bibtex_strings_to_apa, render_bibtex_strings_to_df, or
 generate_bibliography.
 """
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 import nbformat
 
-import bibliography
-from bibliography import collect_library_entries
+from provenance_agent import bibliography
+from provenance_agent.bibliography import collect_library_entries
 
 FAKE_INDEX_SHARED_DOI = {
     "liba": {
@@ -119,7 +114,7 @@ def test_apa_rendering_surface_is_removed():
     ):
         assert not hasattr(bibliography, name)
 
-    import llm
+    from provenance_agent import llm
 
     assert not hasattr(llm, "bibtex_to_apa")
 

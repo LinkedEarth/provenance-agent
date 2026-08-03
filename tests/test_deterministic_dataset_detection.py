@@ -7,15 +7,11 @@ scientific libraries themselves.
 """
 
 import inspect
-import os
-import sys
 from pathlib import Path
 
 import nbformat
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from deterministic_dataset_detection import (
+from provenance_agent.deterministic_dataset_detection import (
     detect_datasets_in_notebook,
     detect_datasets_with_diagnostics,
 )
