@@ -1,5 +1,5 @@
 """
-Unit tests for bibliography.py's collect_library_entries(). Uses real
+Unit tests for citations.py's collect_library_entries(). Uses real
 Citations/ data (pyleoclim has both a paper and a software citation) plus
 a monkeypatched citation index for the DOI-dedup case. The injected data
 workflow uses source metadata directly; the software schema also includes a
@@ -14,8 +14,8 @@ generate_bibliography.
 
 import nbformat
 
-from provenance_agent import bibliography
-from provenance_agent.bibliography import collect_library_entries
+from provenance_agent import citations
+from provenance_agent.citations import collect_library_entries
 
 FAKE_INDEX_SHARED_DOI = {
     "liba": {
@@ -70,7 +70,7 @@ def test_software_entry_bibtex_column_is_parseable_software_type():
 
 
 def test_doi_dedup_keeps_first_entry_only(monkeypatch):
-    monkeypatch.setattr(bibliography, "load_citation_index", lambda: FAKE_INDEX_SHARED_DOI)
+    monkeypatch.setattr(citations, "load_citation_index", lambda: FAKE_INDEX_SHARED_DOI)
     df = collect_library_entries(["liba", "libb"])
     assert len(df) == 1
     assert df.iloc[0]["key"] == "liba_paper"
@@ -112,7 +112,7 @@ def test_apa_rendering_surface_is_removed():
         "generate_bibliography",
         "generate_bibliography_cell",
     ):
-        assert not hasattr(bibliography, name)
+        assert not hasattr(citations, name)
 
     from provenance_agent import llm
 
@@ -122,10 +122,10 @@ def test_apa_rendering_surface_is_removed():
 # --- standard-library imports ------------------------------------------------
 
 def test_is_stdlib_recognizes_interpreter_modules():
-    assert bibliography.is_stdlib("sys")
-    assert bibliography.is_stdlib("json")
-    assert bibliography.is_stdlib("PATHLIB")  # case-insensitive
-    assert not bibliography.is_stdlib("numpy")
+    assert citations.is_stdlib("sys")
+    assert citations.is_stdlib("json")
+    assert citations.is_stdlib("PATHLIB")  # case-insensitive
+    assert not citations.is_stdlib("numpy")
 
 
 def test_stdlib_produces_no_rows():

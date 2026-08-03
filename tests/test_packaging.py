@@ -150,7 +150,7 @@ def test_magic_shim_is_importable_from_outside_the_repository(tmp_path):
 
 def test_citation_lookup_uses_packaged_resources_from_outside_the_repository(tmp_path):
     out = _run_isolated(
-        "from provenance_agent.bibliography import collect_library_entries;"
+        "from provenance_agent.citations import collect_library_entries;"
         "df = collect_library_entries(['pyleoclim']);"
         "print(sorted(df['citation_type']))",
         cwd=tmp_path,
@@ -160,7 +160,7 @@ def test_citation_lookup_uses_packaged_resources_from_outside_the_repository(tmp
 
 def test_citation_index_loads_from_outside_the_repository(tmp_path):
     out = _run_isolated(
-        "from provenance_agent.bibliography import load_citation_index;"
+        "from provenance_agent.citations import load_citation_index;"
         "print('pyleoclim' in load_citation_index())",
         cwd=tmp_path,
     )

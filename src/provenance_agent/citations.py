@@ -5,8 +5,8 @@ workflows share.
 Collection is software-specific: it looks up a notebook's imported libraries in
 Citations/ (a YAML index plus per-library .bib files) and merges their BibTeX
 into one DataFrame, deduped by DOI. Dataset citations are collected elsewhere -
-by the data workflow (data_workflow.py), which runs get_bibtex() /
-get_publications() in the notebook's live kernel.
+by the data workflow (data.py), which runs get_bibtex() / get_publications() in
+the notebook's live kernel.
 
 Implementation:
     - _read_citation_resource(name): reads one file out of the packaged
@@ -34,9 +34,10 @@ Design decisions:
       DataFrame output, not as assembled text. The data workflow still accepts
       an `fmt` argument for compatibility, but it is ignored, so no module
       renders citation text in any format.
-    - The cell-lifecycle helpers live here rather than in notebook_parser
-      because they are written against the frame names this module's output is
-      bound to. Relocating them is deferred to the module-rename task.
+    - The cell-lifecycle helpers live here rather than in notebook_io because
+      they are written against the frame names this module's output is bound to.
+      notebook_io knows how to read a notebook; only this module knows what
+      provenance_software and provenance_datasets mean.
 """
 
 import sys
@@ -49,7 +50,7 @@ from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.bwriter import BibTexWriter
 
-from .notebook_parser import PROVENANCE_CELL_MARKER
+from .notebook_io import PROVENANCE_CELL_MARKER
 
 
 _STDLIB_MODULES = sys.stdlib_module_names

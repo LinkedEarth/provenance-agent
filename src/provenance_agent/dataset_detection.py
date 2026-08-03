@@ -144,7 +144,7 @@ def detect_datasets(notebook_path: str) -> list[list[str]]:
     """
     # DEPRECATED LLM fallback, retained so the project can switch back. To
     # restore it, read the notebook's code with
-    # .notebook_parser.read_notebook_code(notebook_path) and run:
+    # .notebook_io.read_notebook_code(notebook_path) and run:
     # from .llm import llm, message_text
     # response = llm.invoke(build_detection_prompt(code))
     # return parse_detection_response(message_text(response))

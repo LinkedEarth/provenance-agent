@@ -1,6 +1,6 @@
 """
-Data workflow orchestrator: turns detected dataset variables into dataset
-citations by injecting retrieval cells into the notebook's live kernel.
+The whole data side: detected dataset variables in, one injected retrieval cell
+out, plus the public function and LangChain tool that callers reach it by.
 
 Purpose:
     Given the [variable, tool] pairs from dataset_detection, generate one code
@@ -43,8 +43,25 @@ Implementation:
       or nothing when pairs is empty.
     - generate_data_workflow(..., fmt): top-level glue - detect, filter, inject
       the single dataset cell, then write.
+    - cite_data(...): the public name for that workflow, re-exported from the
+      package root.
+    - cite_data_tool: the LangChain StructuredTool wrapper, for direct and API
+      callers. It is not bound to the LCEL classifier.
 
 Design decisions:
+    - The public function, the workflow, and the cell builders live in one
+      module because they are one operation at three levels of detail. They used
+      to be split across an orchestrator module, which meant a reader chasing
+      "what does cite_data actually do" crossed a file boundary to reach a
+      one-line delegation.
+    - cite_data delegates to generate_data_workflow rather than replacing it.
+      Both names are public: cite_data is the API callers and the agent use,
+      generate_data_workflow is the step name notebook tooling regenerates cells
+      with. One implementation, two entry points.
+    - The tool wraps _cite_data_tool_entry, not cite_data, so `detected_pairs`
+      stays out of the tool's public schema. It is an internal reuse hook the
+      LCEL pipeline passes to avoid running detection twice, and a model should
+      never be able to supply it.
     - Cells are written for the user to run (live-kernel model); this module does
       not execute them. Citation and metadata values remain available under
       their generated _bib_{variable} and _meta_{variable} names, and each
@@ -74,6 +91,7 @@ import ast
 import warnings
 
 import nbformat
+from langchain_core.tools import StructuredTool
 
 
 _LIPDVERSE_ENDPOINT = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
@@ -229,7 +247,7 @@ def build_dataset_cell(
     """
     # The marker goes on the cell, not on each retrieval block, since the block
     # is a fragment that never becomes a cell of its own.
-    from .notebook_parser import PROVENANCE_CELL_MARKER
+    from .notebook_io import PROVENANCE_CELL_MARKER
 
     blocks = "".join(
         build_retrieval_cell(variable, tool, endpoint, dataset_names)
@@ -401,7 +419,7 @@ def generate_data_workflow(
         the [variable, tool] pairs that had cells injected
     """
     from .dataset_detection import detect_datasets
-    from .notebook_parser import read_notebook_code
+    from .notebook_io import read_notebook_code
 
     if variable is not None:
         raise ValueError(
@@ -428,7 +446,7 @@ def generate_data_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    from .bibliography import (
+    from .citations import (
         DATASETS_FRAME,
         remove_legacy_combine_cells,
         remove_provenance_cells,
@@ -443,3 +461,74 @@ def generate_data_workflow(
         nbformat.write(nb, f)
 
     return pairs
+
+
+def cite_data(
+    notebook_path: str,
+    targets: str | list[str] | None = None,
+    fmt: str = "bibtex",
+    output_path: str | None = None,
+    detected_pairs: list[list[str]] | None = None,
+) -> list[list[str]]:
+    """
+    Cites the datasets a notebook uses by injecting one retrieval cell for all
+    detected datasets.
+
+    Detection is static (works even if the notebook was never run), but retrieval
+    uses live kernel objects or targeted remote loads, so the results remain in
+    the generated cell's kernel bindings and its output displays each metadata
+    frame rather than returning them from this function.
+
+    Args:
+        notebook_path: path to the .ipynb to analyze and modify
+        targets: None (all detected datasets), a dataset name or study ID, or
+            a list. Specific PyleoTUPS study targets are unsupported and return
+            a warning without changing the notebook.
+        fmt: accepted and ignored. Any string is allowed; the injected cell is
+            the same either way. Kept for compatibility with existing callers
+            and for a future non-LLM APA implementation.
+        output_path: where to write the modified notebook (defaults to in place)
+        detected_pairs: optional precomputed detector result used internally by
+            the LCEL pipeline; normal callers should leave it as None
+
+    Returns:
+        the [variable, tool] pairs that had retrieval cells injected
+    """
+    return generate_data_workflow(
+        notebook_path,
+        targets=targets,
+        output_path=output_path,
+        fmt=fmt,
+        detected_pairs=detected_pairs,
+    )
+
+
+def _cite_data_tool_entry(
+    notebook_path: str,
+    targets: str | list[str] | None = None,
+    fmt: str = "bibtex",
+    output_path: str | None = None,
+) -> list[list[str]]:
+    """Exposes cite_data to LangChain without its internal detector override."""
+    return cite_data(
+        notebook_path,
+        targets=targets,
+        fmt=fmt,
+        output_path=output_path,
+    )
+
+
+cite_data_tool = StructuredTool.from_function(
+    func=_cite_data_tool_entry,
+    name="cite_data",
+    description=(
+        "Cite the datasets a Jupyter notebook uses (PyLiPD, PyleoTUPS, or "
+        "LiPDGraph). Use this for requests about citing data or datasets. Pass "
+        "`notebook_path`; optionally `targets` (dataset names or study IDs, as a "
+        "name or list, to cite only those). `fmt` is accepted for compatibility "
+        "but ignored, so the output is the same whatever it is set to. "
+        "Specific PyleoTUPS study targets return a warning without changing the "
+        "notebook. This injects one retrieval cell; targeted PyLiPD and LiPDGraph "
+        "requests load only the requested dataset names."
+    ),
+)

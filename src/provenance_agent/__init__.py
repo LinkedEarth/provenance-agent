@@ -10,8 +10,8 @@ Purpose:
     caller only pays for what it uses.
 
 Implementation:
-    Re-exports ``cite_data`` and ``cite_software`` from ``.orchestrator`` and
-    names them in ``__all__``. No logic lives here.
+    Re-exports ``cite_data`` from ``.data`` and ``cite_software`` from
+    ``.software`` and names them in ``__all__``. No logic lives here.
 
 Design decisions:
     - The LangChain tools and the LCEL router are deliberately NOT re-exported.
@@ -21,11 +21,12 @@ Design decisions:
       They stay at ``provenance_agent.agent.run``,
       ``provenance_agent.data.cite_data_tool``, and
       ``provenance_agent.software.cite_software_tool``.
-    - ``.orchestrator`` is the temporary source of these two functions. The
-      module-cleanup phase moves them into ``.data`` and ``.software`` and
-      repoints this file, after which ``orchestrator.py`` is deleted.
+    - Each function is imported from the module that implements it, not from a
+      routing module in between. There is no longer an ``orchestrator`` layer to
+      pass through.
 """
 
-from .orchestrator import cite_data, cite_software
+from .data import cite_data
+from .software import cite_software
 
 __all__ = ["cite_data", "cite_software"]

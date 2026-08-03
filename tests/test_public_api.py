@@ -1,11 +1,32 @@
 """
-Unit tests for orchestrator.py. Fully offline: cite_software injects a metadata
-cell (reads imports + writes a notebook, no Gemini), and cite_data is exercised
-with a monkeypatched detector so no network call is made. Both write to a tmp
-output_path so the fixture notebooks are never mutated.
+Tests for the canonical public API - the four import paths a consumer uses:
 
-fmt is accepted and ignored rather than validated, so the tests here pin
-acceptance of arbitrary values and identical output across them, not rejection.
+    from provenance_agent import cite_data, cite_software
+    from provenance_agent.data import cite_data_tool
+    from provenance_agent.software import cite_software_tool
+    from provenance_agent.agent import run
+
+Purpose:
+    Pin the surface itself, not the internals behind it: that each name is
+    reachable at the path above, that the direct functions and the tools
+    behave the same, and that the package root exports the two functions and
+    nothing more. Module-level behavior is covered in test_data.py and
+    test_software.py; this file is about what a caller is entitled to import.
+
+Implementation:
+    Fully offline. cite_software reads imports and writes a notebook, no
+    Gemini. cite_data runs against a monkeypatched detector, so no network
+    call is made. Both write to a tmp output_path so the fixture notebooks
+    are never mutated.
+
+Design decisions:
+    - fmt is accepted and ignored rather than validated, so these tests pin
+      acceptance of arbitrary values and identical output across them, not
+      rejection.
+    - The imports are written out inside each test rather than hoisted to
+      the top of the module. A single top-level import would let one
+      surviving path make every test pass; repeating them is what makes a
+      broken canonical path fail here rather than somewhere downstream.
 """
 
 import os
@@ -13,7 +34,7 @@ import inspect
 
 import pytest
 
-from provenance_agent.orchestrator import cite_software
+from provenance_agent import cite_software
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "sample.ipynb")
 
@@ -30,10 +51,10 @@ def _write_lipdgraph_notebook(path):
 
 
 def test_format_validation_is_removed():
-    from provenance_agent import orchestrator
+    from provenance_agent import data
 
-    assert not hasattr(orchestrator, "_check_fmt")
-    assert not hasattr(orchestrator, "_VALID_FMT")
+    assert not hasattr(data, "_check_fmt")
+    assert not hasattr(data, "_VALID_FMT")
 
 
 def test_cite_software_all_injects_and_returns_libraries(tmp_path):
@@ -76,7 +97,7 @@ def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
     nb_out = tmp_path / "out.ipynb"
     _write_lipdgraph_notebook(str(nb_in))
 
-    from provenance_agent.orchestrator import cite_data
+    from provenance_agent import cite_data
     pairs = cite_data(str(nb_in), fmt="apa", output_path=str(nb_out))
     assert pairs == [["filtered_df2", "LiPDGraph"]]
 
@@ -90,7 +111,8 @@ def test_cite_data_accepts_apa_compatibility_mode(tmp_path, monkeypatch):
 
 
 def test_cite_data_defaults_to_bibtex():
-    from provenance_agent.orchestrator import _cite_data_tool_entry, cite_data
+    from provenance_agent import cite_data
+    from provenance_agent.data import _cite_data_tool_entry
 
     assert inspect.signature(cite_data).parameters["fmt"].default == "bibtex"
     assert inspect.signature(_cite_data_tool_entry).parameters["fmt"].default == "bibtex"
@@ -107,7 +129,7 @@ def test_cite_data_reuses_precomputed_detection(tmp_path, monkeypatch):
     notebook = tmp_path / "in.ipynb"
     _write_lipdgraph_notebook(str(notebook))
 
-    from provenance_agent.orchestrator import cite_data
+    from provenance_agent import cite_data
     pairs = cite_data(
         str(notebook),
         detected_pairs=[["filtered_df2", "LiPDGraph"]],
@@ -125,7 +147,7 @@ def test_cite_data_accepts_any_fmt_with_identical_output(tmp_path, monkeypatch, 
         lambda _path: [["filtered_df2", "LiPDGraph"]],
     )
     import nbformat
-    from provenance_agent.orchestrator import cite_data
+    from provenance_agent import cite_data
 
     def inject(suffix, **kwargs):
         nb_in = tmp_path / f"in_{suffix}.ipynb"
@@ -151,7 +173,7 @@ def test_cite_data_tool_accepts_any_fmt(tmp_path, monkeypatch):
     notebook = tmp_path / "tool.ipynb"
     _write_lipdgraph_notebook(str(notebook))
 
-    from provenance_agent.orchestrator import cite_data_tool
+    from provenance_agent.data import cite_data_tool
     pairs = cite_data_tool.invoke(
         {"notebook_path": str(notebook), "fmt": "apa"}
     )
@@ -195,7 +217,7 @@ def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatc
     with open(notebook, "w") as handle:
         nbformat.write(nb, handle)
 
-    from provenance_agent.orchestrator import cite_data
+    from provenance_agent import cite_data
     assert cite_data(str(notebook)) == [["D", "PyLiPD"]]
 
 
@@ -218,7 +240,7 @@ def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
         nbformat.write(nb, handle)
     before = notebook.read_bytes()
 
-    from provenance_agent.orchestrator import cite_data
+    from provenance_agent import cite_data
     with pytest.warns(UserWarning, match="specific PyleoTUPS"):
         pairs = cite_data(str(notebook), targets=target)
 
@@ -228,14 +250,16 @@ def test_cite_data_pyleotups_target_warns_and_leaves_notebook_alone(
 
 def test_tools_are_structured_tools():
     from langchain_core.tools import StructuredTool
-    from provenance_agent.orchestrator import cite_software_tool, cite_data_tool
+    from provenance_agent.data import cite_data_tool
+    from provenance_agent.software import cite_software_tool
     assert isinstance(cite_software_tool, StructuredTool)
     assert isinstance(cite_data_tool, StructuredTool)
     assert "detected_pairs" not in cite_data_tool.args
 
 
 def test_tool_names_and_descriptions():
-    from provenance_agent.orchestrator import cite_software_tool, cite_data_tool
+    from provenance_agent.data import cite_data_tool
+    from provenance_agent.software import cite_software_tool
     assert cite_software_tool.name == "cite_software"
     assert cite_data_tool.name == "cite_data"
     assert "software" in cite_software_tool.description.lower()
@@ -243,9 +267,41 @@ def test_tool_names_and_descriptions():
 
 
 def test_cite_software_tool_invokes(tmp_path):
-    from provenance_agent.orchestrator import cite_software_tool
+    from provenance_agent.software import cite_software_tool
     out = cite_software_tool.invoke(
         {"notebook_path": SAMPLE, "libraries": "pyleoclim",
          "output_path": str(tmp_path / "out.ipynb")}
     )
     assert out == ["pyleoclim"]
+
+
+# --- the canonical import surface --------------------------------------------
+
+def test_package_root_exports_the_two_direct_functions():
+    import provenance_agent
+
+    assert sorted(provenance_agent.__all__) == ["cite_data", "cite_software"]
+
+
+def test_root_exports_are_the_module_implementations_not_copies():
+    import provenance_agent
+    from provenance_agent import data, software
+
+    assert provenance_agent.cite_data is data.cite_data
+    assert provenance_agent.cite_software is software.cite_software
+
+
+def test_router_is_reachable_from_agent_but_not_re_exported_at_the_root():
+    """`run` stays on .agent so importing the package root stays LLM-free."""
+    import provenance_agent
+    from provenance_agent.agent import run
+
+    assert callable(run)
+    assert not hasattr(provenance_agent, "run")
+
+
+def test_tools_are_not_re_exported_at_the_package_root():
+    import provenance_agent
+
+    assert not hasattr(provenance_agent, "cite_data_tool")
+    assert not hasattr(provenance_agent, "cite_software_tool")

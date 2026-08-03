@@ -12,7 +12,7 @@ Implementation:
     ``prepare_context`` reads imported library names from the notebook;
     ``classify`` parses a Pydantic-validated JSON decision from the model;
     ``resolve_targets`` validates imported software and runs dataset detection
-    only when data is requested; ``dispatch`` calls the existing orchestrator
+    only when data is requested; ``dispatch`` calls the direct workflow
     functions sequentially; and ``verify`` compares the notebook before and
     after dispatch, without executing injected cells. ``run`` returns the
     final JSON-serializable envelope, while the IPython magic formats that
@@ -58,14 +58,10 @@ from langchain_core.runnables import (
 )
 from pydantic import BaseModel, Field
 
+from .data import cite_data, cite_data_tool
 from .llm import llm
-from .notebook_parser import PROVENANCE_CELL_MARKER
-from .orchestrator import (
-    cite_data,
-    cite_data_tool,
-    cite_software,
-    cite_software_tool,
-)
+from .notebook_io import PROVENANCE_CELL_MARKER
+from .software import cite_software, cite_software_tool
 
 
 class TypedTarget(BaseModel):
@@ -147,7 +143,7 @@ def build_messages(request: str, notebook_path: str) -> list:
 
 def _prepare_context(state: dict) -> dict:
     """Adds imported library names and a pre-dispatch notebook snapshot."""
-    from .notebook_parser import parse_notebook
+    from .notebook_io import parse_notebook
 
     notebook_path = state["notebook_path"]
     return {
@@ -229,7 +225,7 @@ def _resolve_targets(state: dict) -> dict:
         detected_pairs = _detect_dataset_pairs(state["notebook_path"])
         if not detected_pairs:
             return _warning_state(state, "No datasets were detected in the notebook.")
-        from .data_workflow import pyleotups_target_warning
+        from .data import pyleotups_target_warning
 
         target_warning = pyleotups_target_warning(
             detected_pairs,

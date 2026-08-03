@@ -49,7 +49,7 @@ from typing import Any, Iterable, TypedDict
 
 import nbformat
 
-from .notebook_parser import is_generated_cell, strip_ipython_directives
+from .notebook_io import is_generated_cell, strip_ipython_directives
 
 
 __all__ = (

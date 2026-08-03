@@ -1,10 +1,11 @@
 """
-Software workflow orchestrator: turns a notebook's imported libraries into a
-citation-metadata cell injected into the notebook.
+The whole software side: a notebook's imported libraries in, one injected
+citation-metadata cell out, plus the public function and LangChain tool that
+callers reach it by.
 
 Purpose:
-    The mirror image of data_workflow.py on the software side. Each workflow
-    owns exactly one cell: this one builds a pandas DataFrame of the software
+    The mirror image of data.py on the software side. Each workflow owns
+    exactly one cell: this one builds a pandas DataFrame of the software
     citations' metadata, binds it to provenance_software, and displays it. Both
     workflows share the same shape - analyze the notebook, append one cell with
     nbformat, write the notebook back, and let the user run the cell to see its
@@ -13,7 +14,7 @@ Purpose:
 Implementation:
     - build_metadata_cell(libraries, citation_types): returns the Python source
       for the injected cell. The cell imports collect_library_entries from
-      provenance_agent.bibliography, calls it on the baked-in library list,
+      provenance_agent.citations, calls it on the baked-in library list,
       binds the result to
       provenance_software, and display()s it. collect_library_entries parses the
       local Citations/ .bib files with bibtexparser, so the DataFrame columns
@@ -25,9 +26,22 @@ Implementation:
     - generate_software_workflow(notebook_path, libraries, citation_types,
       output_path): top-level glue - parse the imports, optionally filter to the
       requested libraries, inject the metadata cell, and write the notebook back.
+    - cite_software(...): the public name for that workflow, re-exported from
+      the package root.
+    - cite_software_tool: the LangChain StructuredTool wrapper, for direct and
+      API callers. It is not bound to the LCEL classifier.
 
 Design decisions:
-    - The cell imports from provenance_agent.bibliography rather than baking the
+    - The public function, the workflow, and the cell builder live in one
+      module because they are one operation at three levels of detail. They used
+      to be split across an orchestrator module, which meant a reader chasing
+      "what does cite_software actually do" crossed a file boundary to reach a
+      one-line delegation.
+    - cite_software delegates to generate_software_workflow rather than
+      replacing it. Both names are public: cite_software is the API callers and
+      the agent use, generate_software_workflow is the step name notebook
+      tooling regenerates cells with. One implementation, two entry points.
+    - The cell imports from provenance_agent.citations rather than baking the
       collected BibTeX inline, so it stays short and always reflects the current
       Citations/ data. The import is package-qualified, so the notebook's kernel
       only needs the package installed (`pip install -e ".[dev]"`) - no
@@ -52,6 +66,7 @@ Design decisions:
 """
 
 import nbformat
+from langchain_core.tools import StructuredTool
 
 
 def build_metadata_cell(
@@ -74,11 +89,11 @@ def build_metadata_cell(
         provenance_agent.bibliography, so the package must be installed in the
         kernel's environment (`pip install -e ".[dev]"`).
     """
-    from .notebook_parser import PROVENANCE_CELL_MARKER
+    from .notebook_io import PROVENANCE_CELL_MARKER
 
     return (
         f"{PROVENANCE_CELL_MARKER}\n"
-        "from provenance_agent.bibliography import collect_library_entries\n"
+        "from provenance_agent.citations import collect_library_entries\n"
         f"provenance_software = collect_library_entries({libraries!r}, {citation_types!r})\n"
         "display(provenance_software)"
     )
@@ -132,8 +147,8 @@ def generate_software_workflow(
         the library names the metadata cell was built for (empty when nothing
         matched, in which case the notebook is left untouched)
     """
-    from .bibliography import is_stdlib
-    from .notebook_parser import parse_notebook, validate_libraries
+    from .citations import is_stdlib
+    from .notebook_io import parse_notebook, validate_libraries
 
     # Dropped before the cell is built, so the baked-in library list and the
     # reported result name only libraries someone would actually cite.
@@ -149,7 +164,7 @@ def generate_software_workflow(
 
     with open(notebook_path) as f:
         nb = nbformat.read(f, as_version=4)
-    from .bibliography import (
+    from .citations import (
         SOFTWARE_FRAME,
         remove_legacy_combine_cells,
         remove_provenance_cells,
@@ -164,3 +179,50 @@ def generate_software_workflow(
         nbformat.write(nb, f)
 
     return wanted
+
+
+def cite_software(
+    notebook_path: str,
+    libraries: str | list[str] | None = None,
+    citation_types: list[str] | None = None,
+    output_path: str | None = None,
+) -> list[str]:
+    """
+    Cites the software libraries a notebook imports by injecting a metadata cell.
+
+    Detection is static (works even if the notebook was never run), and the
+    injected cell builds a pandas DataFrame of the citations' metadata, so the
+    citations appear as the cell's OUTPUT when the user runs it - not as this
+    function's return value.
+
+    Args:
+        notebook_path: path to the .ipynb to analyze and modify
+        libraries: None (all imported libraries), a single name, or a list of
+            names to cite; names not imported by the notebook are dropped
+        citation_types: optional filter - "paper" and/or "software"
+        output_path: where to write the modified notebook (defaults to in place)
+
+    Returns:
+        the library names the injected metadata cell was built for (empty when
+        nothing matched)
+    """
+    return generate_software_workflow(
+        notebook_path,
+        libraries=libraries,
+        citation_types=citation_types,
+        output_path=output_path,
+    )
+
+
+cite_software_tool = StructuredTool.from_function(
+    func=cite_software,
+    name="cite_software",
+    description=(
+        "Cite the software libraries a Jupyter notebook imports. Use this for "
+        "requests about citing software, packages, or libraries. Pass "
+        "`notebook_path`; optionally `libraries` (a name or list to cite only "
+        "those) and `citation_types` ('paper' and/or 'software'). This injects a "
+        "cell that builds a pandas DataFrame of the citation metadata; the user "
+        "runs it to produce the output."
+    ),
+)

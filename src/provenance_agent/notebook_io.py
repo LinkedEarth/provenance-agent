@@ -255,6 +255,6 @@ def parse_notebook(path: str | None = None) -> list[str]:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) != 2:
-        print("Usage: python -m provenance_agent.notebook_parser <path_to_notebook.ipynb>")
+        print("Usage: python -m provenance_agent.notebook_io <path_to_notebook.ipynb>")
         sys.exit(1)
     print("Libraries:", parse_notebook(sys.argv[1]))
