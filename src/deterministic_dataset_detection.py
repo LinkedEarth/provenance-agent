@@ -3,10 +3,10 @@ Deterministic, source-oriented dataset detection for Jupyter notebooks.
 
 Purpose:
     Identify external dataset sources whose values reach a recognized scientific
-    analysis operation, without executing the notebook or calling an LLM. The
-    public entry point accepts only a notebook path and returns the repository's
-    existing list-of-pairs contract, such as
-    [["filtered_df2", "LiPDGraph"]].
+    analysis operation, or whose latest source-backed table is the notebook's
+    terminal result when no analysis is present. The public entry point accepts
+    only a notebook path and returns the repository's existing list-of-pairs
+    contract, such as [["filtered_df2", "LiPDGraph"]].
 
 Implementation:
     The scanner parses code cells in notebook order and builds a small,
@@ -22,7 +22,8 @@ Design decisions:
     - The scanner is conservative: syntax errors, opaque helper functions, and
       dynamic imports do not create guessed source lineage.
     - Source objects are not reported merely because they were loaded or
-      searched. Their lineage must reach a configured analysis sink.
+      searched. Their lineage must reach a configured analysis sink or produce
+      a source-backed terminal table/DataFrame.
     - Analysis calls without resolvable source lineage are retained as
       diagnostics, so an empty pair list can be distinguished from an
       analysis that may use an unsupported loader.
@@ -220,6 +221,12 @@ _TABLE_METHODS = frozenset({
     "astype",
 })
 
+_PANDAS_TABLE_FUNCTIONS = frozenset({
+    "concat",
+    "json_normalize",
+    "merge",
+})
+
 
 # Static extraction algorithm:
 # 1. Parse each non-generated code cell in notebook order; skip cells that
@@ -232,7 +239,9 @@ _TABLE_METHODS = frozenset({
 #    become sinks, even when they receive a source-backed value.
 # 5. For each sink, walk dependencies backward and choose a stable boundary:
 #    the latest table, xarray, or source-object value for each source group.
-# 6. Deduplicate pairs and sort them by source position and variable name.
+# 6. For active sources without a resolved analysis sink, choose the latest
+#    source-backed table/DataFrame as a terminal result.
+# 7. Deduplicate pairs and sort them by source position and variable name.
 
 
 @dataclass
@@ -337,6 +346,61 @@ def _constant_value(node: ast.AST) -> Any:
             pieces.append(str(value.value))
         return "".join(pieces)
     return None
+
+
+def _is_pandas_dataframe_constructor(name: str) -> bool:
+    """Reports whether a callable is a pandas DataFrame constructor."""
+    return _last_name(name).casefold() == "dataframe" and (
+        name.casefold().startswith(("pd.", "pandas."))
+        or "." not in name
+    )
+
+
+def _is_pandas_table_function(name: str) -> bool:
+    """Reports whether a pandas function combines source-backed tables."""
+    return _last_name(name).casefold() in _PANDAS_TABLE_FUNCTIONS and (
+        name.casefold().startswith(("pd.", "pandas."))
+        or "." not in name
+    )
+
+
+def _function_is_sparql_dataframe_loader(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    """Reports whether a helper structurally wraps SPARQL into a DataFrame."""
+    has_wrapper = False
+    has_query = False
+    has_convert = False
+    has_dataframe = False
+
+    for child in ast.walk(function):
+        if not isinstance(child, ast.Call):
+            continue
+        call_name = _qualified_name(child.func)
+        last = _last_name(call_name).casefold()
+        has_wrapper |= last == "sparqlwrapper"
+        has_query |= last in {"query", "setquery"}
+        has_convert |= last == "convert"
+        has_dataframe |= _is_pandas_dataframe_constructor(call_name)
+
+    return has_wrapper and has_query and has_convert and has_dataframe
+
+
+def _has_explicit_pyleotups_identifier(node: ast.Call) -> bool:
+    """Reports whether a PyleoTUPS data call names a concrete study."""
+    identifier_names = {
+        "noaa_id",
+        "noaa_ids",
+        "study_id",
+        "study_ids",
+    }
+    for keyword in node.keywords:
+        if (
+            keyword.arg in identifier_names
+            and _constant_value(keyword.value) is not None
+        ):
+            return True
+    return bool(node.args and _constant_value(node.args[0]) is not None)
 
 
 def _choose_family(evals: Iterable[_Eval], fallback: str = "unknown") -> str:
@@ -939,6 +1003,26 @@ class _NotebookGraph(ast.NodeVisitor):
             and bool(url and _GRAPH_ENDPOINT_PREFIX in url)
         )
 
+    def _is_sparql_dataframe_helper(self, name: str, url: str | None) -> bool:
+        """Reports whether a helper returns a DataFrame from LiPDGraph."""
+        function = self.functions.get(name)
+        return (
+            function is not None
+            and _function_is_sparql_dataframe_loader(function)
+            and bool(url and _GRAPH_ENDPOINT_PREFIX in url)
+        )
+
+    def _is_sparqlwrapper_constructor(
+        self,
+        name: str,
+        url: str | None,
+    ) -> bool:
+        """Reports whether a direct SPARQLWrapper targets LiPDGraph."""
+        return (
+            _last_name(name).casefold() == "sparqlwrapper"
+            and bool(url and _GRAPH_ENDPOINT_PREFIX in url)
+        )
+
     def _is_pandas_reader(self, name: str) -> bool:
         """Reports whether a callable is a configured pandas reader."""
         last = _last_name(name).casefold()
@@ -1014,6 +1098,28 @@ class _NotebookGraph(ast.NodeVisitor):
             self._record_sink(name, evaluation, node)
             return evaluation
 
+        if self._is_sparql_dataframe_helper(name, url):
+            evaluation = self._new_source_eval(
+                "LiPDGraph",
+                "table",
+                "table",
+                node,
+                active=True,
+            )
+            self._record_sink(name, evaluation, node)
+            return evaluation
+
+        if self._is_sparqlwrapper_constructor(name, url):
+            evaluation = self._new_source_eval(
+                "LiPDGraph",
+                "table",
+                "sparql_wrapper",
+                node,
+                active=True,
+            )
+            self._record_sink(name, evaluation, node)
+            return evaluation
+
         constructor = self._constructor_tool(name)
         if constructor is not None:
             tool, family, kind = constructor
@@ -1069,6 +1175,36 @@ class _NotebookGraph(ast.NodeVisitor):
             )
             self._record_sink(name, evaluation, node)
             return evaluation
+
+        if _is_pandas_dataframe_constructor(name):
+            evaluation = _Eval(
+                deps=combined.deps,
+                source_ids=combined.source_ids,
+                family="table",
+                kind="table",
+            )
+            self._record_sink(name, evaluation, node)
+            return evaluation
+
+        if _is_pandas_table_function(name):
+            evaluation = _Eval(
+                deps=combined.deps,
+                source_ids=combined.source_ids,
+                family="table",
+                kind="table",
+            )
+            self._record_sink(name, evaluation, node)
+            return evaluation
+
+        if (
+            receiver.source_ids
+            and method in _PYLEO_DATA_METHODS
+            and _has_explicit_pyleotups_identifier(node)
+        ):
+            for source_id in receiver.source_ids:
+                source = self.sources.get(source_id)
+                if source is not None and source.tool == "PyleoTUPS":
+                    source.active = True
 
         if receiver.source_ids and method in _PYLEO_LOAD_METHODS:
             receiver = self._activate_receiver(
@@ -1211,6 +1347,17 @@ class _NotebookGraph(ast.NodeVisitor):
             return None
         return max(candidates, key=lambda value: value.order)
 
+    def _terminal_table_for_source(self, source: _Source) -> _Value | None:
+        """Selects the latest source-backed table when no analysis resolves it."""
+        candidates = [
+            value
+            for value in self.values.values()
+            if source.source_id in value.source_ids and value.kind == "table"
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda value: value.order)
+
     def _sink_is_resolved(self, sink: _Sink) -> bool:
         """Reports whether a sink reaches a usable recognized source boundary."""
         closure = self._closure(sink.deps)
@@ -1274,6 +1421,7 @@ class _NotebookGraph(ast.NodeVisitor):
             tuple[str, str],
             tuple[tuple[int, int, int, int], tuple[int, int, int, int]],
         ] = {}
+        resolved_source_ids: set[int] = set()
         for sink in self.sinks:
             closure = self._closure(sink.deps)
             for source_id in sorted(sink.source_ids):
@@ -1283,6 +1431,7 @@ class _NotebookGraph(ast.NodeVisitor):
                 candidate = self._candidate_for_source(source, sink, closure)
                 if candidate is None:
                     continue
+                resolved_source_ids.add(source_id)
                 pair = (candidate.name, source.tool)
                 if pair[0] is None:
                     continue
@@ -1290,6 +1439,18 @@ class _NotebookGraph(ast.NodeVisitor):
                 previous = pairs.get(pair)
                 if previous is None or position < previous:
                     pairs[pair] = position
+
+        for source in sorted(self.sources.values(), key=lambda item: item.order):
+            if not source.active or source.source_id in resolved_source_ids:
+                continue
+            candidate = self._terminal_table_for_source(source)
+            if candidate is None or candidate.name is None:
+                continue
+            pair = (candidate.name, source.tool)
+            position = (source.order, candidate.order)
+            previous = pairs.get(pair)
+            if previous is None or position < previous:
+                pairs[pair] = position
 
         ordered = sorted(
             pairs.items(),

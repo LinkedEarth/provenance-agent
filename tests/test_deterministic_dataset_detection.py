@@ -107,6 +107,87 @@ pca = mgs_common.pca()
     ]
 
 
+def test_no_analysis_uses_latest_filtered_table_boundary(tmp_path):
+    notebook = tmp_path / "filtered_only.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+filtered = raw[raw["value"].notna()]
+final = filtered.drop_duplicates(subset=["id"]).reset_index(drop=True)
+display(final)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["final", "pandas"]]
+
+
+def test_sparql_dataframe_helpers_produce_one_result_per_query(tmp_path):
+    notebook = tmp_path / "sparql_helpers.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from SPARQLWrapper import SPARQLWrapper, JSON
+import pandas as pd
+
+def fetch_sparql(endpoint_url, query):
+    sparql = SPARQLWrapper(endpoint_url)
+    sparql.setQuery(query)
+    sparql.setReturnFormat(JSON)
+    results = sparql.query().convert()
+    return pd.DataFrame(results["results"]["bindings"])
+
+endpoint = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+first = fetch_sparql(endpoint, "first")
+first_filtered = first.drop_duplicates(subset=["id"])
+second = fetch_sparql(endpoint, "second")
+second_filtered = second[second["value"].notna()]
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["first_filtered", "LiPDGraph"],
+        ["second_filtered", "LiPDGraph"],
+    ]
+
+
+def test_direct_sparqlwrapper_dataframe_is_a_lipdgraph_source(tmp_path):
+    notebook = tmp_path / "direct_sparql.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from SPARQLWrapper import SPARQLWrapper, JSON
+import pandas as pd
+
+endpoint = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+sparql = SPARQLWrapper(endpoint)
+sparql.setReturnFormat(JSON)
+result = sparql.query().convert()
+final = pd.DataFrame(result["results"]["bindings"])
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["final", "LiPDGraph"]]
+
+
+def test_pyleotups_get_data_with_explicit_study_id_activates_source(tmp_path):
+    notebook = tmp_path / "direct_pyleotups_data.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pyleotups as pt
+
+ds = pt.PangaeaDataset()
+data = ds.get_data(study_id="830587")[0]
+fit = SomeModel().fit(data)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["ds", "PyleoTUPS"]]
+
+
 def test_unused_pylipd_load_is_omitted_without_analysis(tmp_path):
     notebook = tmp_path / "unused_lipd.ipynb"
     _write_notebook(
@@ -197,7 +278,7 @@ solver = Eof(signal)
     assert detect_datasets_in_notebook(str(notebook)) == [["ds_geo", "xarray"]]
 
 
-def test_inspection_and_plotting_methods_are_not_analysis_sinks(tmp_path):
+def test_inspection_and_plotting_methods_report_terminal_table(tmp_path):
     notebook = tmp_path / "inspection_only.ipynb"
     _write_notebook(
         notebook,
@@ -218,7 +299,7 @@ df.plot()
 """,
     )
 
-    assert detect_datasets_in_notebook(str(notebook)) == []
+    assert detect_datasets_in_notebook(str(notebook)) == [["df", "LiPDGraph"]]
 
 
 def test_merged_pyleotups_objects_report_terminal_merged_name(tmp_path):
