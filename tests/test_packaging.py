@@ -146,6 +146,81 @@ def test_magic_shim_is_importable_from_outside_the_repository(tmp_path):
     assert out == "ProvenanceMagics"
 
 
+# --- import costs no credentials ----------------------------------------------
+#
+# A fresh clone has no .env, because .env is untracked. Before the client was
+# made lazy these properties all failed, which meant the documented
+# `pytest tests/ -q` verification step errored out for every new contributor.
+#
+# Dropping the key variables is not enough to reproduce that here: _run_isolated
+# deliberately runs the snippet as a file, which is the shape python-dotenv needs
+# before it will do its source-tree search, so it finds this checkout's own .env.
+# NO_DOTENV neutralizes the lookup itself. It has to run before provenance_agent
+# is imported, because llm.py binds these two names at its own import time.
+
+NO_DOTENV = (
+    "import dotenv\n"
+    "dotenv.find_dotenv = lambda *a, **k: ''\n"
+    "dotenv.load_dotenv = lambda *a, **k: False\n"
+)
+
+NO_KEYS = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
+
+
+def test_the_fresh_clone_environment_really_has_no_key(tmp_path):
+    """Guards the three tests below: prove the setup hides the credentials."""
+    out = _run_isolated(
+        NO_DOTENV
+        + "import os, provenance_agent.llm as m\n"
+        "print(repr(m.dotenv_path), 'GOOGLE_API_KEY' in os.environ)\n",
+        cwd=tmp_path,
+        drop_env=NO_KEYS,
+    )
+    assert out == "'' False"
+
+
+def test_importing_the_agent_needs_no_credentials(tmp_path):
+    """Importing must construct neither the chat client nor the chain."""
+    out = _run_isolated(
+        NO_DOTENV
+        + "import provenance_agent.agent as a\n"
+        "print(a._llm._CLIENT is None, a._CHAIN is None)\n",
+        cwd=tmp_path,
+        drop_env=NO_KEYS,
+    )
+    assert out == "True True"
+
+
+def test_loading_the_magic_needs_no_credentials(tmp_path):
+    """`%load_ext provenance` must work before a key is configured."""
+    out = _run_isolated(
+        NO_DOTENV
+        + "import provenance\n"
+        "shell = type('S', (), {'register_magics': lambda self, m: print(m.__name__)})()\n"
+        "provenance.load_ipython_extension(shell)\n",
+        cwd=tmp_path,
+        drop_env=NO_KEYS,
+    )
+    assert out == "ProvenanceMagics"
+
+
+def test_a_missing_key_is_still_reported_on_first_model_use(tmp_path):
+    """Deferred, not discarded: the error still names the variable to set."""
+    out = _run_isolated(
+        NO_DOTENV
+        + "import provenance_agent.agent as a\n"
+        "try:\n"
+        "    a.get_chain()\n"
+        "except RuntimeError as error:\n"
+        "    print('named' if 'GOOGLE_API_KEY' in str(error) else 'unnamed')\n"
+        "else:\n"
+        "    print('no error raised')\n",
+        cwd=tmp_path,
+        drop_env=NO_KEYS,
+    )
+    assert out == "named"
+
+
 # --- packaged citation data --------------------------------------------------
 
 def test_citation_lookup_uses_packaged_resources_from_outside_the_repository(tmp_path):

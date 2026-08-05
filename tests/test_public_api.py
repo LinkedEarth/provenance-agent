@@ -199,7 +199,9 @@ def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatc
 
     monkeypatch.setattr(dataset_detection, "build_detection_prompt", detonate)
     monkeypatch.setattr(dataset_detection, "parse_detection_response", detonate)
-    monkeypatch.setattr(llm, "llm", _NoClient())
+    # Seed the cache rather than patching `llm`: reading that name is what
+    # constructs the real client, which would need credentials.
+    monkeypatch.setattr(llm, "_CLIENT", _NoClient())
 
     # A notebook the real analyzer resolves, so this asserts the deterministic
     # detector produced the answer rather than that nothing ran at all.

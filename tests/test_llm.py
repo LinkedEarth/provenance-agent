@@ -14,9 +14,12 @@ Two areas are covered, both without a network call or a real API key:
   keyword arguments a chat class would and records them for inspection.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from provenance_agent import llm as llm_module
 from provenance_agent.llm import (
@@ -273,13 +276,42 @@ def test_the_key_check_runs_before_the_import(clean_env):
 
 # --- the module-level client --------------------------------------------------
 
-def test_the_shared_client_exists_and_was_built_by_the_registry():
+def test_importing_the_module_constructs_no_client():
     """
-    Whatever provider this checkout is configured for, importing the module
-    must have produced one client rather than deferring construction.
+    The whole point of the lazy accessor: import must cost nothing and need no
+    credentials. Anything already cached came from another test, not import.
     """
-    assert llm_module.llm is not None
-    assert hasattr(llm_module.llm, "invoke")
+    source = (REPO_ROOT / "src" / "provenance_agent" / "llm.py").read_text()
+    assert "\nllm = build_llm()" not in source
+    assert "_CLIENT = None" in source
+
+
+def test_the_client_is_built_on_first_access_and_cached(clean_env):
+    """Reading `llm` builds one client through the registry and reuses it."""
+    clean_env.setitem(PROVIDERS, "fake", _recording_spec())
+    clean_env.setenv("FAKE_API_KEY", "x")
+    clean_env.setenv("PROVENANCE_LLM_PROVIDER", "fake")
+    clean_env.setattr(llm_module, "_CLIENT", None)
+
+    first = llm_module.llm
+    second = llm_module.llm
+
+    assert first.model == "fake-default"
+    assert first is second, "the client must be cached, not rebuilt per access"
+
+
+def test_seeding_the_cache_avoids_construction(clean_env):
+    """The supported substitution point: assign _CLIENT, never patch `llm`."""
+    sentinel = SimpleNamespace(model="substituted")
+    clean_env.setattr(llm_module, "_CLIENT", sentinel)
+
+    assert llm_module.llm is sentinel
+
+
+def test_an_unknown_module_attribute_still_raises_attribute_error():
+    """__getattr__ must not swallow genuine typos."""
+    with pytest.raises(AttributeError):
+        llm_module.no_such_attribute
 
 
 def test_every_registered_provider_is_fully_specified():

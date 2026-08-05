@@ -67,10 +67,12 @@ def _fake_model(decision):
 
 
 def test_build_chain_exposes_lcel_graph():
-    assert hasattr(agent, "chain")
     assert hasattr(agent, "build_chain")
-    assert hasattr(agent.chain, "get_graph")
-    names = {node.name for node in agent.chain.get_graph().nodes.values()}
+    # Built with a fake model rather than read from agent.chain: touching that
+    # attribute would construct the configured client, which needs credentials.
+    built = agent.build_chain(_fake_model({"action": "cite", "scope": "all"}))
+    assert hasattr(built, "get_graph")
+    names = {node.name for node in built.get_graph().nodes.values()}
     assert {
         "prepare_context", "classify", "resolve_targets", "dispatch", "verify"
     } <= names
@@ -305,9 +307,11 @@ def test_run_returns_the_chain_envelope(monkeypatch):
         "dispatch": [],
         "verification": {},
     }
+    # _CHAIN is the cache get_chain() reads. Patching it substitutes the
+    # pipeline without reading agent.chain, which would build the real one.
     monkeypatch.setattr(
         agent,
-        "chain",
+        "_CHAIN",
         RunnableLambda(lambda _input: expected),
     )
     assert agent.run("whatever", SAMPLE) == expected
@@ -346,7 +350,7 @@ def test_an_injected_model_bypasses_the_module_chain(tmp_path, monkeypatch):
     def detonate(*_args, **_kwargs):
         raise AssertionError("the module-level chain was used despite model=")
 
-    monkeypatch.setattr(agent, "chain", RunnableLambda(detonate))
+    monkeypatch.setattr(agent, "_CHAIN", RunnableLambda(detonate))
 
     decision = {
         "action": "cite",
@@ -362,10 +366,10 @@ def test_an_injected_model_bypasses_the_module_chain(tmp_path, monkeypatch):
     assert result["status"] == "ok"
 
 
-def test_omitting_the_model_still_reads_the_module_chain(monkeypatch):
-    """The default path resolves `chain` at call time, so patching still wins."""
+def test_omitting_the_model_still_reads_the_default_chain(monkeypatch):
+    """The default path resolves the cached chain at call time."""
     expected = {"status": "ok", "decision": None, "dispatch": [], "verification": {}}
-    monkeypatch.setattr(agent, "chain", RunnableLambda(lambda _input: expected))
+    monkeypatch.setattr(agent, "_CHAIN", RunnableLambda(lambda _input: expected))
 
     assert agent.run("whatever", SAMPLE) == expected
     assert agent.run("whatever", SAMPLE, model=None) == expected

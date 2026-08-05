@@ -36,7 +36,15 @@ Design decisions:
       fail classification. The surface is held open for a future non-LLM APA
       implementation.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
-      the module-level ``chain`` uses the client configured in ``llm.py``.
+      the default pipeline uses the client configured in ``llm.py``.
+    - Nothing is constructed at import. ``chain`` is resolved through a PEP 562
+      module ``__getattr__`` that calls ``get_chain()``, and ``llm`` is imported
+      as a module rather than by name so its own lazy attribute is not read
+      here. Importing this module therefore needs no credentials, which is what
+      lets ``%load_ext provenance`` load and the offline test suite run on a
+      fresh clone that has no ``.env``. A missing key surfaces on first model
+      use instead of at import. Substitute the pipeline by assigning ``_CHAIN``,
+      not by patching ``chain``: reading ``chain`` is what builds it.
     - ``run(..., model=...)`` exposes that same injection point to callers. It
       exists so an embedding application - PaleoPAL, eventually - can pass its
       own chat client instead of the one this package configures, which keeps
@@ -70,7 +78,9 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, Field
 
 from .data import cite_data, cite_data_tool
-from .llm import llm
+# Imported as a module, not `from .llm import llm`: binding the name here would
+# read llm.llm at import time and construct the client, defeating its laziness.
+from . import llm as _llm
 from .notebook_io import PROVENANCE_CELL_MARKER
 from .software import cite_software, cite_software_tool
 
@@ -404,7 +414,9 @@ def build_chain(model: Runnable | None = None) -> Runnable:
         a Runnable composed as prepare_context | classify | resolve_targets |
         dispatch | verify
     """
-    classifier_model = model if model is not None else llm
+    # _llm.llm is a lazy attribute: reading it here, inside the call, is what
+    # keeps import of this module credential-free.
+    classifier_model = model if model is not None else _llm.llm
     classify = _CLASSIFIER_PROMPT | classifier_model | _CLASSIFIER_PARSER
     prepare = RunnableLambda(_prepare_context, name="prepare_context")
     classify_assign = RunnablePassthrough.assign(decision=classify)
@@ -418,7 +430,46 @@ def build_chain(model: Runnable | None = None) -> Runnable:
     return prepare | classify_state | resolve | dispatch | verify
 
 
-chain = build_chain()
+_CHAIN = None
+
+
+def get_chain() -> Runnable:
+    """
+    Returns the default pipeline, building it on first use.
+
+    Building it requires the configured chat client, so this is deferred rather
+    than run at import: importing this module must not need credentials.
+    The result is cached in ``_CHAIN``; assign that name to substitute a chain
+    without triggering construction, which is how the tests inject fakes.
+
+    Returns:
+        the module's shared Runnable pipeline
+    """
+    global _CHAIN
+    if _CHAIN is None:
+        _CHAIN = build_chain()
+    return _CHAIN
+
+
+def __getattr__(name):
+    """
+    Resolves ``chain`` lazily, preserving ``agent.chain`` for inspection.
+
+    PEP 562 module-level ``__getattr__``: it runs only for names this module
+    does not define, so it fires for ``chain`` and never for ``_CHAIN``.
+
+    Args:
+        name: the attribute being looked up
+
+    Returns:
+        the shared pipeline when ``name`` is "chain"
+
+    Raises:
+        AttributeError: for every other name, as normal attribute lookup would
+    """
+    if name == "chain":
+        return get_chain()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _parser_warning_envelope(message: str) -> dict:
@@ -456,9 +507,9 @@ def run(
         a JSON-serializable dictionary containing classification, dispatch, and
         static verification results
     """
-    # Read the module global at call time rather than binding it as a default,
-    # so monkeypatching ``chain`` still works.
-    active_chain = chain if model is None else build_chain(model)
+    # get_chain() resolves the cached ``_CHAIN`` at call time, so substituting
+    # that name still redirects run() and no chain is built until it is needed.
+    active_chain = get_chain() if model is None else build_chain(model)
     try:
         return active_chain.invoke({
             "request": request,

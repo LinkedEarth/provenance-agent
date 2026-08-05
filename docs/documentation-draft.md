@@ -244,7 +244,9 @@ pytest tests/ -q
 ```
 
 The suite is fully offline. No test calls a model, SPARQL, or a remote dataset
-service, and it needs no API key.
+service, and it needs no API key. That holds on a fresh clone with no `.env`:
+the chat client is built on first use rather than at import, so importing the
+agent costs no credentials, and `tests/test_packaging.py` pins that property.
 
 ---
 
@@ -341,9 +343,9 @@ for call in result["dispatch"]:
 ```
 
 `run` is imported from `provenance_agent.agent`, not from the package root.
-That is deliberate: `agent` builds the chat client at import time, so
-re-exporting it would make `import provenance_agent` require credentials for
-callers that only want the two direct functions.
+That keeps the routing layer, its LangChain dependencies, and its provider
+configuration off the import path of callers who only want the two direct
+functions.
 
 #### Supplying your own model
 
@@ -363,13 +365,13 @@ configuring a second one through `PROVENANCE_LLM_PROVIDER`. The provider
 registry then serves standalone use and gets out of the way when it is not
 wanted.
 
-Two caveats. The injected model is used only for classification; nothing else
-in the pipeline calls a model, so the rest of the run is unaffected. And
-injecting a model does **not** currently avoid constructing the configured
-client: importing `provenance_agent.agent` imports `llm`, which builds one
-eagerly, so a provider and key are still required to reach `run` at all.
-Deferring that is a separate change, because it would move the missing-key
-error from import time to first use.
+The injected model is used only for classification; nothing else in the
+pipeline calls a model, so the rest of the run is unaffected.
+
+Injecting also costs nothing when you do not use the configured provider. The
+default client is built on first use rather than at import, so a caller that
+always passes `model=` never constructs one, and never needs
+`PROVENANCE_LLM_PROVIDER` or a key at all.
 
 ### What the injected cells look like
 
@@ -474,7 +476,7 @@ not connect it to a recognized source.
 |---|---|---|
 | `The provenance_agent module is not an IPython extension.` | `%load_ext provenance_agent` | the extension is `%load_ext provenance`. `provenance_agent` is the *import* name, not the magic |
 | `UsageError: Line magic function '%provenance' not found.` | the extension never loaded, usually the row above | fix the `%load_ext` line and re-run it before any `%provenance` line |
-| `%load_ext provenance` raises `RuntimeError: No API key found for LLM provider ...` | no key for the selected provider. Loading the magic imports `agent`, which imports `llm`, which builds the client at import | set the variable the message names, in a `.env` at the project root or exported. Use the direct functions if you do not need routing |
+| A `%provenance` request raises `RuntimeError: No API key found for LLM provider ...` | no key for the selected provider. The client is built on first use, so this surfaces at the first request rather than at `%load_ext` | set the variable the message names, in a `.env` at the project root or exported. Use the direct functions if you do not need routing |
 | `RuntimeError: LLM provider 'openai' needs the langchain_openai package` | `PROVENANCE_LLM_PROVIDER` selected a provider whose integration is not installed | run the install command in the message, e.g. `pip install -e ".[openai]"` |
 | `ValueError: Unknown LLM provider ...` | a typo in `PROVENANCE_LLM_PROVIDER` | the message lists the registered names; see [Choosing an LLM provider](#choosing-an-llm-provider) |
 | `UsageError: Could not auto-detect the current notebook path` | `ipynbname` cannot match the kernel, normal in VSCode | `%provenance_notebook path/to/notebook.ipynb` |
@@ -606,7 +608,10 @@ provenance-agent/
 │       │                           that normalizes a response to text. Owns
 │       │                           provider selection and credential discovery.
 │       │                           Integrations are imported lazily, so only
-│       │                           the selected provider must be installed
+│       │                           the selected provider must be installed, and
+│       │                           the client itself is built on first access
+│       │                           via a module __getattr__, so importing
+│       │                           costs no credentials
 │       └── Citations/              packaged citation data: library_citations.yml
 │                                   (the index) plus one .bib per library
 ├── notebooks/
@@ -648,7 +653,7 @@ provenance-agent/
 | `test_deterministic_dataset_detection.py` | the analyzer, including the tracked corpus |
 | `test_agent.py`, `test_magic.py`, `test_provenance_shim.py` | routing, rendering, and the `%load_ext` shim |
 | `test_public_api.py` | the four canonical import paths |
-| `test_packaging.py` | properties only an install shows: imports and citation lookup from outside the checkout, credential discovery, and a built wheel with no `.env` in it |
+| `test_packaging.py` | properties only an install shows: imports and citation lookup from outside the checkout, credential discovery, that importing the agent and loading the magic need no credentials at all, and a built wheel with no `.env` in it |
 | `test_import_hygiene.py` | an AST scan that fails on any `sys.path` mutation or retired flat import, in Python **or** in a notebook code cell |
 | `test_notebooks.py` | every notebook validates, round-trips, and resolves its local `.lpd`/`.bib` paths |
 
@@ -743,18 +748,22 @@ provenance-agent/
 
 ### The agent layer
 
-- **`%provenance` and `agent.run` need an API key.** So does `%load_ext
-  provenance` itself, because loading the magic imports the router, which
-  imports the client, which validates the key at construction. Which key depends
-  on `PROVENANCE_LLM_PROVIDER`; the default is Google. The direct functions need
-  nothing.
-- **Injecting a model does not yet avoid that.** `run(..., model=...)` chooses
-  what classifies the request, but the configured client is still constructed
-  when `provenance_agent.agent` is imported, so a provider and key are required
-  even by a caller that never uses them. Making the client lazy would fix this
-  and is deliberately not done yet: it moves the missing-key error from import
-  time to first use, which is a user-visible change worth making on purpose
-  rather than as a side effect.
+- **`%provenance` and `agent.run` need an API key, but importing does not.**
+  The client is built on first model use, so `%load_ext provenance`, `import
+  provenance_agent.agent`, and the whole test suite all work with no
+  credentials configured. The missing key is reported when you actually ask the
+  agent to route something. Which key depends on `PROVENANCE_LLM_PROVIDER`; the
+  default is Google. The direct functions never need one.
+- **That means a missing key is reported late rather than early.** You will not
+  find out at `%load_ext` time that your `.env` is wrong; you find out on your
+  first `%provenance` request. This is the deliberate tradeoff for letting a
+  fresh clone run the test suite and for letting an embedding application
+  supply its own model without configuring this one.
+- **Substitute a client by assigning the cache, not by patching the name.**
+  `provenance_agent.llm._CLIENT` and `provenance_agent.agent._CHAIN` are the
+  supported injection points. Reading `llm.llm` or `agent.chain` is what
+  triggers construction, so patching those names defeats the laziness and,
+  without credentials, raises instead.
 - **Only one model call is ever made, and only by the agent layer.** It
   classifies the request. Nothing else in the tool - detection, citation lookup,
   cell generation - consults a model, which is why the provider choice barely

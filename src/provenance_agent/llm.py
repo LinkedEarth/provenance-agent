@@ -23,8 +23,9 @@ Implementation:
       chat class. Two environment variables select what gets built -
       `PROVENANCE_LLM_PROVIDER` (default `google`) and `PROVENANCE_LLM_MODEL`
       (default: the provider's entry in the registry).
-    - `llm`: the module-level client, built once at import with temperature=0
-      for determinism.
+    - `llm`: the shared client, resolved through a PEP 562 module-level
+      `__getattr__` that calls `get_llm()`. It is built on first access, not at
+      import, cached in `_CLIENT`, and uses temperature=0 for determinism.
     - `message_text(message)`: normalizes a response's content to plain text
       (providers return either a string or a list of typed content parts).
 
@@ -59,6 +60,18 @@ Design decisions:
       different task would silently cost them money and latency. All of this is
       a documented convenience, not a contract - ours always wins, and nothing
       breaks if PaleoPAL renames a variable.
+    - The client is built lazily so importing costs nothing and needs nothing.
+      It used to be constructed at module scope, which meant importing
+      `provenance_agent.agent` - and therefore `%load_ext provenance` - failed
+      without credentials. That broke a fresh clone: `.env` is untracked, so a
+      new contributor running the documented `pytest tests/ -q` got collection
+      errors from the three test modules that import the agent, despite the
+      suite being genuinely offline. Deferring construction to first access
+      fixes that. The tradeoff is that a missing key is now reported when the
+      model is first used rather than at import; that is the intended
+      behavior, not an oversight. Substitute a client by assigning `_CLIENT`,
+      never by patching the `llm` name, because reading `llm` is what triggers
+      construction.
     - Credentials are validated here, before the chat class is constructed.
       Pydantic-based chat classes raise a `ValidationError` about a field name
       when a key is absent, which reads as a bug in this project rather than a
@@ -259,7 +272,49 @@ def build_llm(
     return chat_class(model=model_id, temperature=temperature, **kwargs)
 
 
-llm = build_llm()
+_CLIENT = None
+
+
+def get_llm():
+    """
+    Returns the shared chat client, constructing it on first use.
+
+    The client is cached in the module-level ``_CLIENT``, so every caller gets
+    the same object and the provider is resolved exactly once per process.
+    Tests and embedding applications can pre-seed or replace ``_CLIENT``
+    directly, which is the supported way to substitute a client without
+    triggering construction.
+
+    Returns:
+        the configured LangChain chat model
+    """
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = build_llm()
+    return _CLIENT
+
+
+def __getattr__(name):
+    """
+    Resolves ``llm`` lazily so importing this module needs no credentials.
+
+    PEP 562 module-level ``__getattr__``: it runs only for names that are not
+    real module attributes, so it fires for ``llm`` until something assigns
+    that name and never fires for ``_CLIENT``, ``build_llm``, or anything else
+    defined above.
+
+    Args:
+        name: the attribute being looked up
+
+    Returns:
+        the shared chat client when ``name`` is "llm"
+
+    Raises:
+        AttributeError: for every other name, as normal attribute lookup would
+    """
+    if name == "llm":
+        return get_llm()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def message_text(message) -> str:
