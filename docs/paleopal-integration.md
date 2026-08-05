@@ -165,10 +165,17 @@ result = await asyncio.to_thread(
 ```
 
 The process that executes generated dataset cells needs the dataset retrieval
-dependencies, including `pylipd` and `pyleotups`. The notebook's own scientific
-packages, such as `pyleoclim` and `xarray`, still need to be installed in the
-notebook environment when its cells require them. Passing a model to `run()`
-does not install or load any provider integration.
+dependencies, `pylipd` and `pyleotups`. These are not core dependencies: they
+are the opt-in `data` extra (`pip install "provenance-agent[data]"`), because
+the package itself never imports them - only the generated cell source does.
+Install them wherever cells are executed, not necessarily where the package
+generates them. Note that a missing one surfaces as a plain
+`ModuleNotFoundError` raised inside the executed cell, not as a friendly
+install message.
+
+The notebook's own scientific packages, such as `pyleoclim` and `xarray`, still
+need to be installed in the notebook environment when its cells require them.
+Passing a model to `run()` does not install or load any provider integration.
 
 PaleoPAL should also account for its execution service's state rules:
 

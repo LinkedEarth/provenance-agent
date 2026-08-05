@@ -64,6 +64,24 @@ The `data` option installs `pylipd` and `pyleotups`, which are needed only when
 the notebook kernel executes generated PyLiPD, LiPDGraph, or PyleoTUPS
 retrieval cells. 
 
+
+
+### Before installing into an existing scientific environment
+
+pip can silently replace conda-managed scientific packages with PyPI builds.
+If you are installing into an environment you care about, check first:
+
+```bash
+pip install --dry-run -e ".[dev,google,data]"
+```
+
+The output should end with `Would install provenance-agent-0.1.0`. If it
+proposes changing conda-managed packages such as `numpy`, `pandas`,
+`pylipd`, or `pyleotups`, install with `--no-deps` instead and then run
+`pip check`.
+
+
+
 To install in a new conda environment, run:
 
 ```bash
@@ -83,20 +101,6 @@ in, and install your analysis libraries there too.
 Example notebooks may additionally require notebook-specific scientific packages such as `pyleoclim`, `xarray`, etc. that require further installation.
 
 
-
-### Before installing into an existing scientific environment
-
-pip can silently replace conda-managed scientific packages with PyPI builds.
-If you are installing into an environment you care about, check first:
-
-```bash
-pip install --dry-run -e ".[dev,google,data]"
-```
-
-The output should end with `Would install provenance-agent-0.1.0`. If it
-proposes changing conda-managed packages such as `numpy`, `pandas`,
-`pylipd`, or `pyleotups`, install with `--no-deps` instead and then run
-`pip check`.
 
 
 ### Credentials
