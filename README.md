@@ -60,10 +60,9 @@ For a runtime environment without test tools, run:
 pip install -e ".[google,data]"
 ```
 
-The `data` extra installs `pylipd` and `pyleotups`, which are needed only when
+The `data` option installs `pylipd` and `pyleotups`, which are needed only when
 the notebook kernel executes generated PyLiPD, LiPDGraph, or PyleoTUPS
-retrieval cells. Core installs such as `.[dev,google]` are enough for notebook
-parsing, software citations, and deterministic dataset detection.
+retrieval cells. 
 
 To install in a new conda environment, run:
 
@@ -103,7 +102,7 @@ proposes changing conda-managed packages such as `numpy`, `pandas`,
 ### Credentials
 
 Only the natural-language layers (`%provenance` and `agent.run`) call a model.
-`.env.example` lists the recognized names; rename it to `.env` and
+`.env.example` lists the recognized names; copy or rename it to `.env` and
 fill in the one you need.
 
 
@@ -153,13 +152,6 @@ Run the test suite from the repository root in the development environment:
 
 ```bash
 python -m pytest tests/ -q
-```
-
-The tests do not require LLM credentials.
-In the project environment, run:
-
-```bash
- -m pytest tests/ -q
 ```
 
 The benchmark evaluates the deterministic software and dataset detectors
