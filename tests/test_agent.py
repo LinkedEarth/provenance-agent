@@ -10,14 +10,13 @@ callers even though the model is no longer bound to those tools.
 
 import json
 import nbformat
-import os
 import shutil
 
 from provenance_agent import agent
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
+from notebook_fixtures import SAMPLE
 
 
 def test_classifier_prompt_is_json_only_and_uses_context():
@@ -67,10 +66,12 @@ def _fake_model(decision):
 
 
 def test_build_chain_exposes_lcel_graph():
-    assert hasattr(agent, "chain")
     assert hasattr(agent, "build_chain")
-    assert hasattr(agent.chain, "get_graph")
-    names = {node.name for node in agent.chain.get_graph().nodes.values()}
+    # Built with a fake model rather than read from agent.chain: touching that
+    # attribute would construct the configured client, which needs credentials.
+    built = agent.build_chain(_fake_model({"action": "cite", "scope": "all"}))
+    assert hasattr(built, "get_graph")
+    names = {node.name for node in built.get_graph().nodes.values()}
     assert {
         "prepare_context", "classify", "resolve_targets", "dispatch", "verify"
     } <= names
@@ -305,12 +306,72 @@ def test_run_returns_the_chain_envelope(monkeypatch):
         "dispatch": [],
         "verification": {},
     }
+    # _CHAIN is the cache get_chain() reads. Patching it substitutes the
+    # pipeline without reading agent.chain, which would build the real one.
     monkeypatch.setattr(
         agent,
-        "chain",
+        "_CHAIN",
         RunnableLambda(lambda _input: expected),
     )
     assert agent.run("whatever", SAMPLE) == expected
+
+
+# --- injected classification model --------------------------------------------
+
+def test_run_accepts_an_injected_model(tmp_path):
+    """
+    An embedding application supplies its own chat client. The injected model
+    classifies, and the rest of the pipeline runs normally against it.
+    """
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+
+    result = agent.run(
+        "cite the software", str(notebook), model=_fake_model(decision)
+    )
+
+    assert result["status"] == "ok"
+    assert "software" in result["verification"]["present"]
+
+
+def test_an_injected_model_bypasses_the_module_chain(tmp_path, monkeypatch):
+    """Passing a model must not touch the configured client's chain at all."""
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+
+    def detonate(*_args, **_kwargs):
+        raise AssertionError("the module-level chain was used despite model=")
+
+    monkeypatch.setattr(agent, "_CHAIN", RunnableLambda(detonate))
+
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+    result = agent.run(
+        "cite the software", str(notebook), model=_fake_model(decision)
+    )
+
+    assert result["status"] == "ok"
+
+
+def test_omitting_the_model_still_reads_the_default_chain(monkeypatch):
+    """The default path resolves the cached chain at call time."""
+    expected = {"status": "ok", "decision": None, "dispatch": [], "verification": {}}
+    monkeypatch.setattr(agent, "_CHAIN", RunnableLambda(lambda _input: expected))
+
+    assert agent.run("whatever", SAMPLE) == expected
+    assert agent.run("whatever", SAMPLE, model=None) == expected
 
 
 def test_rerun_with_unchanged_inputs_still_verifies(tmp_path, monkeypatch):

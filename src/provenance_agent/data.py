@@ -19,8 +19,9 @@ Implementation:
       the LiPDGraph pathway loads from the same repository the notebook queried.
     - build_retrieval_cell(variable, tool, endpoint, dataset_names): returns the
       retrieval block for one dataset - a fragment, not a standalone cell.
-      Untargeted PyLiPD/PyleoTUPS calls use the library method directly on the
-      in-memory object (Approach C: {var}.{method}). A targeted PyLiPD request
+      Untargeted PyLiPD/PyleoTUPS calls reuse the object the notebook already
+      loaded, calling the retrieval method straight on it ({var}.{method}), so
+      nothing is fetched twice. A targeted PyLiPD request
       creates a fresh LiPD object and calls load_remote_datasets() with only
       the requested names. A targeted LiPDGraph request passes those names
       directly to load_remote_datasets() rather than reading every name from
@@ -33,8 +34,9 @@ Implementation:
     - build_dataset_cell(pairs, endpoint, fmt, dataset_names): composes one
       retrieval block per dataset into the single injected cell, followed by a
       display of each source's metadata frame.
-    - filter_datasets(pairs, tool, variable): retains the legacy variable-level
-      filter behavior.
+    - filter_datasets(pairs, tool, variable): an internal compatibility helper
+      that narrows detected [variable, tool] pairs. Its variable argument is a
+      legacy notebook-source filter, not a user-facing dataset selector.
     - split_targets(pairs, targets): treats every non-empty target as an exact
       dataSetName filter and keeps all detected pairs so each retrieval cell
       can handle that name for its own provider.
@@ -265,13 +267,19 @@ def filter_datasets(
     variable: str | list[str] | None = None,
 ) -> list[list[str]]:
     """
-    Narrows detected [variable, tool] pairs by tool and/or variable.
+    Applies internal filters to detected [variable, tool] pairs.
+
+    This helper works on detector output, where the first value is a notebook
+    variable name. It is retained for compatibility and is not the public way
+    to select a dataset. User-facing selection goes through ``targets=`` on
+    ``cite_data`` and uses dataset names or study IDs.
 
     Args:
         pairs: detected [variable, tool] pairs
         tool: if given, keep only pairs whose tool matches (case-insensitive)
-        variable: if given, keep only pairs for this variable name or, if a
-            list, any variable in it
+        variable: legacy internal filter; if given, keep only pairs for this
+            notebook variable name or, if a list, any variable in it. This is
+            not a dataset name and is not accepted by ``cite_data``.
 
     Returns:
         the filtered list of pairs (all pairs when no filter is given)
@@ -404,8 +412,10 @@ def generate_data_workflow(
     Args:
         notebook_path: path to the .ipynb to analyze and modify
         tool: optional tool filter (e.g. "PyLiPD")
-        variable: deprecated source-variable selector; user-facing targeting
-            must use dataset names through ``targets``
+        variable: retired. Passing anything other than None raises ValueError;
+            select datasets by name through ``targets`` instead. The parameter
+            remains in the signature so an old call fails with an explanation
+            rather than TypeError.
         output_path: where to write the modified notebook (defaults to
             notebook_path, i.e. in place)
         fmt: accepted and ignored; see the module docstring
@@ -417,6 +427,9 @@ def generate_data_workflow(
 
     Returns:
         the [variable, tool] pairs that had cells injected
+
+    Raises:
+        ValueError: if ``variable`` is given, which is retired targeting
     """
     from .dataset_detection import detect_datasets
     from .notebook_io import read_notebook_code
@@ -509,7 +522,23 @@ def _cite_data_tool_entry(
     fmt: str = "bibtex",
     output_path: str | None = None,
 ) -> list[list[str]]:
-    """Exposes cite_data to LangChain without its internal detector override."""
+    """
+    Exposes cite_data to LangChain without its internal detector override.
+
+    cite_data also accepts ``detected_pairs``, an internal hook the LCEL
+    pipeline uses to avoid running detection twice. Wrapping it here keeps that
+    parameter out of the tool's generated schema, so a model can never supply
+    it.
+
+    Args:
+        notebook_path: path to the .ipynb to analyze and modify
+        targets: None, one dataset name, or a list of them
+        fmt: accepted and ignored; see the module docstring
+        output_path: where to write the result (defaults to in place)
+
+    Returns:
+        the [variable, tool] pairs that had a retrieval cell injected
+    """
     return cite_data(
         notebook_path,
         targets=targets,

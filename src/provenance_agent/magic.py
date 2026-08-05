@@ -38,8 +38,9 @@ Design decisions:
       notebook; this module only resolves the notebook path and renders the
       result. It imports `agent` and nothing else from the project, so the
       routing contract stays in one place. Importing this module therefore
-      imports the agent and its LLM client; the direct `cite_data` /
-      `cite_software` functions on the package root deliberately do not.
+      imports the agent, but not a chat client: that is built on first model
+      use, so `%load_ext provenance` succeeds with no credentials configured
+      and a missing key surfaces at the first `%provenance` request instead.
     - The logic is module-level functions rather than methods on the Magics
       class, so tests exercise it without constructing an IPython shell.
     - UsageError (not RuntimeError) for user mistakes: IPython renders it as a
@@ -250,12 +251,39 @@ class ProvenanceMagics(Magics):
 
     @line_magic
     def provenance(self, line: str) -> None:
-        """Routes a citation request and prints the result in the cell."""
+        """
+        Routes a citation request and prints the result in the cell.
+
+        Args:
+            line: everything after `%provenance`, e.g. "cite the software"
+
+        Returns:
+            None. The summary is printed, so it becomes the cell's output.
+
+        Raises:
+            UsageError: if the request is empty or the notebook path cannot be
+                resolved
+        """
         print(cite(line))
 
     @line_magic
     def provenance_notebook(self, line: str) -> None:
-        """Sets the notebook path to use when auto-detection fails."""
+        """
+        Sets the notebook path to use when auto-detection fails.
+
+        The override lasts for the rest of the kernel session. In VSCode this
+        is the normal way to work rather than a fallback, because ipynbname
+        cannot match the kernel to a Jupyter server session there.
+
+        Args:
+            line: everything after `%provenance_notebook`, a path to a .ipynb
+
+        Returns:
+            None. A confirmation naming the stored path is printed.
+
+        Raises:
+            UsageError: if no path was given
+        """
         path = line.strip()
         if not path:
             raise UsageError("Usage: %provenance_notebook <path.ipynb>")

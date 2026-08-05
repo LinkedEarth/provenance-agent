@@ -85,9 +85,9 @@ def build_metadata_cell(
         Python source that, run in the notebook's kernel, binds
         provenance_software to a pandas DataFrame of the libraries' citation
         metadata and displays it, so the citations are the cell's output. The
-        cell imports collect_library_entries from
-        provenance_agent.bibliography, so the package must be installed in the
-        kernel's environment (`pip install -e ".[dev]"`).
+        cell imports collect_library_entries from provenance_agent.citations,
+        so the package must be installed in the kernel's environment
+        (`pip install -e ".[dev]"`).
     """
     from .notebook_io import PROVENANCE_CELL_MARKER
 
@@ -131,7 +131,7 @@ def generate_software_workflow(
     Detects a notebook's imported libraries and injects their metadata cell.
 
     Reads the notebook, extracts its imports, optionally narrows them to the
-    requested libraries, appends a cell that binds _provbib_software to the
+    requested libraries, appends a cell that binds provenance_software to the
     citation-metadata DataFrame and displays it, then writes the notebook back.
     The user runs that cell to see the DataFrame as its output.
 

@@ -418,7 +418,21 @@ def _pylipd_get_timeseries_returns_dataframe(node: ast.Call) -> bool:
 
 
 def _choose_family(evals: Iterable[_Eval], fallback: str = "unknown") -> str:
-    """Chooses a non-unknown family while combining expression dependencies."""
+    """
+    Chooses a non-unknown family while combining expression dependencies.
+
+    "unknown" entries are ignored so a single untyped operand does not erase
+    the family of everything it is combined with. When the remaining entries
+    disagree, the first is kept: a conflict means the expression mixes
+    sources, and the earliest one is the lineage worth following.
+
+    Args:
+        evals: expression information for the child expressions being combined
+        fallback: family to use when every entry is "unknown"
+
+    Returns:
+        the chosen family name
+    """
     families = [item.family for item in evals if item.family != "unknown"]
     if not families:
         return fallback
@@ -431,7 +445,21 @@ def _combine_evals(
     family: str | None = None,
     kind: str | None = None,
 ) -> _Eval:
-    """Unions static expression information from several child expressions."""
+    """
+    Unions static expression information from several child expressions.
+
+    Dependencies and source IDs accumulate, so lineage survives an expression
+    that touches several values. A literal is kept only when exactly one child
+    has one, since two competing literals cannot be resolved statically.
+
+    Args:
+        evals: the child expressions' information
+        family: overrides the family that would be chosen from the children
+        kind: overrides the kind, which otherwise comes from the first child
+
+    Returns:
+        one _Eval standing for the combined expression
+    """
     items = list(evals)
     literals = [item.literal for item in items if item.literal is not None]
     return _Eval(
@@ -465,7 +493,21 @@ class _NotebookGraph(ast.NodeVisitor):
         self._next_source_id = 0
 
     def process(self, tree: ast.AST, cell_index: int) -> None:
-        """Visits one parsed notebook cell in source order."""
+        """
+        Visits one parsed notebook cell in source order.
+
+        Cells share one scanner, so bindings made in an earlier cell are still
+        live here. That is what lets lineage cross cell boundaries the way it
+        does in a real kernel.
+
+        Args:
+            tree: the cell's parsed AST
+            cell_index: the cell's zero-based position, recorded on every
+                value so diagnostics can name where something happened
+
+        Returns:
+            None. The scanner's graph is updated in place.
+        """
         self.cell_index = cell_index
         self.visit(tree)
 
@@ -486,7 +528,20 @@ class _NotebookGraph(ast.NodeVisitor):
         node: ast.AST,
         active: bool,
     ) -> int:
-        """Creates a source group and returns its stable ID."""
+        """
+        Creates a source group and returns its stable ID.
+
+        Args:
+            tool: the reported source library, e.g. "PyLiPD" or "LiPDGraph"
+            family: the broad value shape, e.g. "object", "table", "xarray"
+            node: the AST node that created it, used for source position
+            active: whether the source counts as loaded already. A constructor
+                alone is inactive until a load or query call activates it,
+                which is what keeps an unused source from being cited.
+
+        Returns:
+            the new source's ID
+        """
         source_id = self._next_source_id
         self._next_source_id += 1
         self.sources[source_id] = _Source(
@@ -504,7 +559,21 @@ class _NotebookGraph(ast.NodeVisitor):
         evaluation: _Eval,
         node: ast.AST,
     ) -> _Value:
-        """Adds a versioned value and assigns source constructor names."""
+        """
+        Adds a versioned value and assigns source constructor names.
+
+        The first name a source is bound to becomes that source's reported
+        name, which is what the caller ultimately sees in a [variable, tool]
+        pair. Later rebindings create new versions but do not rename it.
+
+        Args:
+            name: the variable name being bound
+            evaluation: the expression information being stored
+            node: the AST node, used for source position
+
+        Returns:
+            the newly created value version
+        """
         for source_id in evaluation.created_sources:
             source = self.sources[source_id]
             if source.name is None:
@@ -524,7 +593,20 @@ class _NotebookGraph(ast.NodeVisitor):
         return value
 
     def _assign_name(self, name: str, evaluation: _Eval, node: ast.AST) -> _Value:
-        """Creates a value version and makes it the current binding."""
+        """
+        Creates a value version and makes it the current binding.
+
+        Versioning rather than overwriting is what lets a name be reassigned
+        without destroying the lineage of what it held before.
+
+        Args:
+            name: the variable name being assigned
+            evaluation: the expression information to bind
+            node: the AST node, used for source position
+
+        Returns:
+            the value version now bound to the name
+        """
         value = self._new_value(name, evaluation, node)
         self.env[name] = value
         return value
@@ -547,7 +629,20 @@ class _NotebookGraph(ast.NodeVisitor):
         node: ast.AST,
         active: bool,
     ) -> _Eval:
-        """Creates expression information for a new external source."""
+        """
+        Creates expression information for a new external source.
+
+        Args:
+            tool: the reported source library
+            family: the broad value shape
+            kind: the specific value type, e.g. "pylipd_object"
+            node: the AST node, used for source position
+            active: whether the source counts as loaded already
+
+        Returns:
+            an _Eval carrying the new source in both source_ids and
+            created_sources, so the next assignment can name it
+        """
         source_id = self._new_source(tool, family, node, active)
         return _Eval(
             family=family,
@@ -564,7 +659,24 @@ class _NotebookGraph(ast.NodeVisitor):
         method: str,
         node: ast.AST,
     ) -> _Eval:
-        """Marks a source object as loaded and versions a direct receiver."""
+        """
+        Marks a source object as loaded and versions a direct receiver.
+
+        A source constructed but never loaded stays inactive and is not
+        reported. This is where a load or query call flips it to active, so
+        only sources the notebook actually populated can be cited. Arguments
+        count too, since a load can take another source's value.
+
+        Args:
+            receiver_node: the AST node of the object the method was called on
+            receiver: that object's expression information
+            arguments: expression information for the call's arguments
+            method: the called method's name, checked against the load registry
+            node: the call node, used for source position
+
+        Returns:
+            expression information for the call's result
+        """
         argument_list = list(arguments)
         argument_sources = frozenset(
             source_id
@@ -616,7 +728,23 @@ class _NotebookGraph(ast.NodeVisitor):
         arguments: Iterable[_Eval],
         node: ast.AST,
     ) -> _Eval:
-        """Propagates source lineage through list append/extend operations."""
+        """
+        Propagates source lineage through list append/extend operations.
+
+        Notebooks routinely build a list of series in a loop and then analyze
+        it. Without this, lineage would stop at the append and the source
+        behind the loop would go uncited.
+
+        Args:
+            receiver_node: the AST node of the collection being mutated
+            receiver: that collection's expression information
+            arguments: expression information for the appended values
+            node: the call node, used for source position
+
+        Returns:
+            expression information for the call's result. The collection's own
+            binding is also updated, so later reads see the added lineage.
+        """
         argument_list = list(arguments)
         receiver_name = _simple_name(receiver_node)
         source_ids = receiver.source_ids | frozenset(
@@ -806,7 +934,21 @@ class _NotebookGraph(ast.NodeVisitor):
         environments: Iterable[dict[str, _Value]],
         node: ast.AST,
     ) -> None:
-        """Creates a union value for names that differ across branches."""
+        """
+        Creates a union value for names that differ across branches.
+
+        A name assigned in only some branches, or assigned differently in each,
+        becomes one value carrying every branch's lineage. Being static, the
+        scanner cannot know which branch runs, so it keeps all of them rather
+        than guessing one.
+
+        Args:
+            environments: one name-to-value mapping per branch
+            node: the branching AST node, used for source position
+
+        Returns:
+            None. The scanner's current bindings are updated in place.
+        """
         environments = list(environments)
         names = set().union(*(environment.keys() for environment in environments))
         for name in sorted(names):
@@ -843,7 +985,21 @@ class _NotebookGraph(ast.NodeVisitor):
         evaluation: _Eval,
         node: ast.AST,
     ) -> None:
-        """Assigns an expression to names, destructuring targets, or cells."""
+        """
+        Assigns an expression to names, destructuring targets, or cells.
+
+        Recurses through tuple, list, and starred targets so that
+        `bib, meta = ...` gives both names the same lineage. A subscript
+        assignment updates the base object instead of creating a new name.
+
+        Args:
+            target: the assignment target AST node
+            evaluation: the expression information being assigned
+            node: the assignment node, used for source position
+
+        Returns:
+            None. Bindings are updated in place.
+        """
         if isinstance(target, ast.Name):
             self._assign_name(target.id, evaluation, node)
             return
@@ -885,7 +1041,21 @@ class _NotebookGraph(ast.NodeVisitor):
         base: _Eval,
         target: ast.Subscript,
     ) -> tuple[str, str]:
-        """Infers a family/kind for a subscripted dataset value."""
+        """
+        Infers a family/kind for a subscripted dataset value.
+
+        Subscripting changes what a value is: a column out of a table is still
+        tabular, while a variable out of an xarray collection is a DataArray.
+        Tracking that is what lets the terminal-table fallback stay tabular.
+
+        Args:
+            base: expression information for the object being subscripted
+            target: the subscript AST node, read to tell a string key from a
+                positional or slice index
+
+        Returns:
+            the (family, kind) pair for the subscripted value
+        """
         if base.family == "xarray":
             if base.kind == "xarray_collection":
                 return "xarray", "xarray_dataset"
@@ -997,7 +1167,22 @@ class _NotebookGraph(ast.NodeVisitor):
     # ------------------------------------------------------------- call rules
 
     def _call_url(self, node: ast.Call, evaluations: list[_Eval]) -> str | None:
-        """Resolves a statically known URL argument from a call."""
+        """
+        Resolves a statically known URL argument from a call.
+
+        Checks the already-evaluated literal first, then the raw AST node, so
+        a URL held in a variable is found as well as one written inline. This
+        is how a LiPDGraph call is told apart from any other HTTP call.
+
+        Args:
+            node: the call being inspected
+            evaluations: expression information for its arguments, positional
+                first then keyword, matching the order this function scans
+
+        Returns:
+            the first argument that is statically a string starting with
+            "http", or None when no URL can be resolved without running code
+        """
         candidates = list(node.args)
         candidates.extend(keyword.value for keyword in node.keywords)
         for argument, evaluation in zip(candidates, evaluations):
@@ -1010,7 +1195,18 @@ class _NotebookGraph(ast.NodeVisitor):
         return None
 
     def _is_graph_post(self, name: str, url: str | None) -> bool:
-        """Reports whether a call is a LinkedEarth graph request."""
+        """
+        Reports whether a call is a LinkedEarth graph request.
+
+        Args:
+            name: the dotted callable name, e.g. "requests.post"
+            url: the resolved URL argument, or None if it is not static
+
+        Returns:
+            True only for a requests.post whose URL is a known graph endpoint.
+            A URL that could not be resolved statically yields False, so an
+            unrecognized call is never guessed into a source.
+        """
         return (
             _last_name(name).casefold() == "post"
             and "requests" in name.casefold()
@@ -1018,7 +1214,23 @@ class _NotebookGraph(ast.NodeVisitor):
         )
 
     def _is_sparql_dataframe_helper(self, name: str, url: str | None) -> bool:
-        """Reports whether a helper returns a DataFrame from LiPDGraph."""
+        """
+        Reports whether a helper returns a DataFrame from LiPDGraph.
+
+        Lineage does not otherwise cross a user-defined function. This is the
+        one exception: a helper whose body structurally wraps a SPARQL query
+        into a DataFrame is recognized, because that pattern is common enough
+        in these notebooks that ignoring it would lose the source.
+
+        Args:
+            name: the called function's name, looked up among functions
+                defined in the notebook
+            url: the resolved URL argument, or None if it is not static
+
+        Returns:
+            True if the named local function is a SPARQL-to-DataFrame helper
+            and the URL is a known graph endpoint
+        """
         function = self.functions.get(name)
         return (
             function is not None
@@ -1031,7 +1243,17 @@ class _NotebookGraph(ast.NodeVisitor):
         name: str,
         url: str | None,
     ) -> bool:
-        """Reports whether a direct SPARQLWrapper targets LiPDGraph."""
+        """
+        Reports whether a direct SPARQLWrapper targets LiPDGraph.
+
+        Args:
+            name: the dotted callable name
+            url: the resolved URL argument, or None if it is not static
+
+        Returns:
+            True for a SPARQLWrapper constructed against a known graph
+            endpoint
+        """
         return (
             _last_name(name).casefold() == "sparqlwrapper"
             and bool(url and _GRAPH_ENDPOINT_PREFIX in url)
@@ -1071,7 +1293,23 @@ class _NotebookGraph(ast.NodeVisitor):
         evaluation: _Eval,
         node: ast.Call,
     ) -> None:
-        """Records an analysis call, including calls without source lineage."""
+        """
+        Records an analysis call, including calls without source lineage.
+
+        Sinks with no resolvable lineage are kept deliberately: they are what
+        diagnostic_warnings reports, and they are why "found nothing" can be
+        told apart from "found analysis I could not trace".
+
+        Args:
+            name: the called function's name, matched against the analysis
+                registry. A name outside the registry is ignored entirely.
+            evaluation: expression information for the call, carrying whatever
+                lineage reached it
+            node: the call node, used for source position
+
+        Returns:
+            None. The sink is appended to the scanner's list.
+        """
         if not _is_analysis_sink(name):
             return
         self.sinks.append(
@@ -1344,7 +1582,24 @@ class _NotebookGraph(ast.NodeVisitor):
         sink: _Sink,
         closure: set[int],
     ) -> _Value | None:
-        """Selects the nearest analysis-boundary value for one source."""
+        """
+        Selects the nearest analysis-boundary value for one source.
+
+        A source's data usually passes through several intermediate variables
+        before analysis. The one worth reporting is the last meaningful value
+        on that path, filtered to the kinds that make sense for the source's
+        family, so a LiPDGraph query reports the filtered DataFrame rather
+        than the raw response.
+
+        Args:
+            source: the source group being resolved
+            sink: the analysis call the data reached
+            closure: value IDs reachable from that sink's dependencies
+
+        Returns:
+            the value to report for this source, or None when nothing in the
+            closure is an appropriate boundary
+        """
         candidates = [
             self.values[value_id]
             for value_id in closure
@@ -1420,7 +1675,18 @@ class _NotebookGraph(ast.NodeVisitor):
         )
 
     def diagnostic_warnings(self) -> list[str]:
-        """Returns warnings for analysis calls with unresolved source lineage."""
+        """
+        Returns warnings for analysis calls with unresolved source lineage.
+
+        Two distinct cases, worded differently because they mean different
+        things: an analysis with no recognized lineage at all, likely an
+        unsupported loader, and one whose source was found but never
+        activated, meaning it was constructed and never loaded.
+
+        Returns:
+            one message per unresolved analysis call, deduplicated, naming the
+            operation and its cell and line
+        """
         messages: list[str] = []
         seen: set[str] = set()
         for sink in self.sinks:
@@ -1467,7 +1733,17 @@ class _NotebookGraph(ast.NodeVisitor):
         return messages
 
     def results(self) -> list[list[str]]:
-        """Returns deterministic, deduplicated source/tool pairs."""
+        """
+        Returns deterministic, deduplicated source/tool pairs.
+
+        Walks each analysis call back to its sources, then adds the terminal
+        tabular fallback for any active source no analysis resolved. Ordering
+        is by source position rather than discovery order, so the same
+        notebook always produces the same list.
+
+        Returns:
+            [variable, tool] pairs, the contract the whole project is built on
+        """
         pairs: dict[
             tuple[str, str],
             tuple[tuple[int, int, int, int], tuple[int, int, int, int]],

@@ -14,7 +14,6 @@ dependencies = [
   "requests",
   "python-dotenv",
   "langchain-core",
-  "langchain-google-genai",
   "pydantic",
   "ipython",
   "ipynbname",
@@ -25,6 +24,26 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest",
+]
+# One extra per entry in provenance_agent.llm.PROVIDERS, including the default
+# provider. No LLM integration is a core dependency: each is imported lazily and
+# is only needed when PROVENANCE_LLM_PROVIDER selects it, so nobody installs a
+# provider they will not use. A core install therefore has no provider at all,
+# and build_llm() raises the exact `pip install` command for the one selected.
+google = [
+  "langchain-google-genai",
+]
+openai = [
+  "langchain-openai",
+]
+anthropic = [
+  "langchain-anthropic",
+]
+ollama = [
+  "langchain-ollama",
+]
+xai = [
+  "langchain-xai",
 ]
 
 [tool.setuptools]

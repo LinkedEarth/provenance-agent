@@ -36,7 +36,26 @@ Design decisions:
       fail classification. The surface is held open for a future non-LLM APA
       implementation.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
-      the module-level ``chain`` uses the configured Gemini client.
+      the default pipeline uses the client configured in ``llm.py``.
+    - Nothing is constructed at import. ``chain`` is resolved through a PEP 562
+      module ``__getattr__`` that calls ``get_chain()``, and ``llm`` is imported
+      as a module rather than by name so its own lazy attribute is not read
+      here. Importing this module therefore needs no credentials, which is what
+      lets ``%load_ext provenance`` load and the offline test suite run on a
+      fresh clone that has no ``.env``. A missing key surfaces on first model
+      use instead of at import. Substitute the pipeline by assigning ``_CHAIN``,
+      not by patching ``chain``: reading ``chain`` is what builds it.
+    - ``run(..., model=...)`` exposes that same injection point to callers. It
+      exists so an embedding application - PaleoPAL, eventually - can pass its
+      own chat client instead of the one this package configures, which keeps
+      ``llm.py``'s provider registry a standalone-mode default rather than a
+      competing abstraction that has to be removed on integration. Omitting the
+      argument reads the module-level ``chain`` at call time, so the default
+      path and monkeypatching both behave exactly as before. Injecting a model
+      also avoids constructing the configured client entirely: importing this
+      module imports ``llm`` but never reads its lazy ``llm`` attribute, so a
+      caller that always passes ``model=`` never builds one and needs neither
+      ``PROVENANCE_LLM_PROVIDER`` nor a key.
 """
 
 from __future__ import annotations
@@ -59,7 +78,9 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, Field
 
 from .data import cite_data, cite_data_tool
-from .llm import llm
+# Imported as a module, not `from .llm import llm`: binding the name here would
+# read llm.llm at import time and construct the client, defeating its laziness.
+from . import llm as _llm
 from .notebook_io import PROVENANCE_CELL_MARKER
 from .software import cite_software, cite_software_tool
 
@@ -161,7 +182,20 @@ def _detect_dataset_pairs(notebook_path: str) -> list[list[str]]:
 
 
 def _warning_state(state: dict, message: str) -> dict:
-    """Marks a pipeline state as a no-op warning before dispatch."""
+    """
+    Marks a pipeline state as a no-op warning before dispatch.
+
+    Clears ``resolved`` and ``dispatch`` so the stages downstream find nothing
+    to run. That is what makes an unclear or unsatisfiable request leave the
+    notebook untouched rather than raising.
+
+    Args:
+        state: the pipeline state so far
+        message: the user-facing explanation of why nothing was done
+
+    Returns:
+        a new state with status "warning" and no work queued
+    """
     return {
         **state,
         "status": "warning",
@@ -291,7 +325,22 @@ def _snapshot_cells(notebook_path: str) -> Counter:
 
 
 def _new_cells(before: Counter, notebook) -> list:
-    """Returns cell instances added since a prior source multiset snapshot."""
+    """
+    Returns cell instances added since a prior source multiset snapshot.
+
+    Compares against a Counter rather than a set so a notebook that already
+    held two identical cells is handled correctly: each snapshot occurrence is
+    consumed once, and only genuinely new copies are reported.
+
+    Args:
+        before: a Counter of (cell_type, source) taken by _snapshot_cells
+            before dispatch ran
+        notebook: the nbformat notebook node as it stands after dispatch
+
+    Returns:
+        the cell nodes present now that the snapshot did not account for, in
+        notebook order
+    """
     remaining = before.copy()
     added = []
     for cell in notebook.cells:
@@ -369,7 +418,21 @@ def _verify(state: dict) -> dict:
 
 
 def _public_result(state: dict, verification: dict) -> dict:
-    """Builds the JSON-serializable result returned by the public API."""
+    """
+    Builds the JSON-serializable result returned by the public API.
+
+    ``warning`` is only present when there is one, so callers can test for the
+    key rather than for an empty value.
+
+    Args:
+        state: the finished pipeline state, carrying status, decision, and
+            dispatch records
+        verification: the static before/after comparison from _verify
+
+    Returns:
+        the envelope run() returns: status, decision, dispatch, verification,
+        and warning when the run produced one
+    """
     result = {
         "status": state.get("status", "ok"),
         "decision": state.get("decision"),
@@ -387,13 +450,15 @@ def build_chain(model: Runnable | None = None) -> Runnable:
 
     Args:
         model: optional LangChain Runnable used for classification; omitted uses
-            the configured Gemini client.
+            the client configured in llm.py, built on first use.
 
     Returns:
         a Runnable composed as prepare_context | classify | resolve_targets |
         dispatch | verify
     """
-    classifier_model = model if model is not None else llm
+    # _llm.llm is a lazy attribute: reading it here, inside the call, is what
+    # keeps import of this module credential-free.
+    classifier_model = model if model is not None else _llm.llm
     classify = _CLASSIFIER_PROMPT | classifier_model | _CLASSIFIER_PARSER
     prepare = RunnableLambda(_prepare_context, name="prepare_context")
     classify_assign = RunnablePassthrough.assign(decision=classify)
@@ -407,7 +472,46 @@ def build_chain(model: Runnable | None = None) -> Runnable:
     return prepare | classify_state | resolve | dispatch | verify
 
 
-chain = build_chain()
+_CHAIN = None
+
+
+def get_chain() -> Runnable:
+    """
+    Returns the default pipeline, building it on first use.
+
+    Building it requires the configured chat client, so this is deferred rather
+    than run at import: importing this module must not need credentials.
+    The result is cached in ``_CHAIN``; assign that name to substitute a chain
+    without triggering construction, which is how the tests inject fakes.
+
+    Returns:
+        the module's shared Runnable pipeline
+    """
+    global _CHAIN
+    if _CHAIN is None:
+        _CHAIN = build_chain()
+    return _CHAIN
+
+
+def __getattr__(name):
+    """
+    Resolves ``chain`` lazily, preserving ``agent.chain`` for inspection.
+
+    PEP 562 module-level ``__getattr__``: it runs only for names this module
+    does not define, so it fires for ``chain`` and never for ``_CHAIN``.
+
+    Args:
+        name: the attribute being looked up
+
+    Returns:
+        the shared pipeline when ``name`` is "chain"
+
+    Raises:
+        AttributeError: for every other name, as normal attribute lookup would
+    """
+    if name == "chain":
+        return get_chain()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _parser_warning_envelope(message: str) -> dict:
@@ -425,20 +529,31 @@ def _parser_warning_envelope(message: str) -> dict:
     }
 
 
-def run(request: str, notebook_path: str) -> dict:
+def run(
+    request: str,
+    notebook_path: str,
+    model: Runnable | None = None,
+) -> dict:
     """
     Runs the LCEL pipeline and returns its structured JSON envelope.
 
     Args:
         request: natural-language citation request
         notebook_path: notebook to inspect and mutate in place
+        model: optional LangChain Runnable to classify with. Omitting it uses
+            the module-level ``chain`` and therefore the configured provider;
+            passing one builds a chain around it instead, which is how an
+            embedding application supplies its own client.
 
     Returns:
         a JSON-serializable dictionary containing classification, dispatch, and
         static verification results
     """
+    # get_chain() resolves the cached ``_CHAIN`` at call time, so substituting
+    # that name still redirects run() and no chain is built until it is needed.
+    active_chain = get_chain() if model is None else build_chain(model)
     try:
-        return chain.invoke({
+        return active_chain.invoke({
             "request": request,
             "notebook_path": notebook_path,
         })

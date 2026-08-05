@@ -156,6 +156,16 @@ def _add_entry_row(
 
     Entries sharing a DOI with an already-added row are skipped; entries
     without a DOI are never deduplicated against each other.
+
+    Args:
+        rows: the accumulating row dicts, appended to in place
+        seen_dois: DOIs already added, updated in place
+        library: the library this citation belongs to
+        citation_type: "paper" or "software"
+        entry: one parsed bibtexparser entry dict
+
+    Returns:
+        None. Both rows and seen_dois are mutated in place.
     """
     doi = entry.get("doi", "")
     if doi and doi in seen_dois:
@@ -253,6 +263,20 @@ def remove_provenance_cells(nb, frame: str) -> None:
         frame: the bound frame name, SOFTWARE_FRAME or DATASETS_FRAME
     """
     def belongs_to_frame(cell) -> bool:
+        """
+        Reports whether one cell is the injected cell for ``frame``.
+
+        The software cell is found by its binding, ``provenance_software = ``.
+        The data cell needs the second branch because it does not bind
+        DATASETS_FRAME at all - it binds one _bib_/_meta_ pair per source - so
+        it is recognized as a generated cell that is not the software one.
+
+        Args:
+            cell: an nbformat cell node
+
+        Returns:
+            True if this cell is the previously injected cell for ``frame``
+        """
         if cell.cell_type != "code":
             return False
         if f"{frame} = " in cell.source:

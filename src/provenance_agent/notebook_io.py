@@ -27,12 +27,12 @@ Implementation:
 
 Design decisions:
     - Injected cells are excluded from both scans. They carry imports of their
-      own (the software cell imports bibliography, a LiPDGraph retrieval cell
-      imports pylipd), which are the tool's machinery rather than the notebook's
-      dependencies - and since pylipd has a citation on file, scanning them made
-      a second run cite a library the notebook never used. New cells carry
-      PROVENANCE_CELL_MARKER; the legacy signatures are matched too so notebooks
-      written by earlier versions need no re-run.
+      own (the software cell imports provenance_agent.citations, a LiPDGraph
+      retrieval cell imports pylipd), which are the tool's machinery rather than
+      the notebook's dependencies - and since pylipd has a citation on file,
+      scanning them made a second run cite a library the notebook never used.
+      New cells carry PROVENANCE_CELL_MARKER; the legacy signatures are matched
+      too so notebooks written by earlier versions need no re-run.
     - Detection of *datasets* is NOT done here. It is delegated to the
       deterministic detector exposed by dataset_detection.py. This module is
       otherwise purely the software (import) side.
@@ -44,7 +44,7 @@ import warnings
 
 import nbformat
 
-# Cell magics whose body is not Python — discard the entire cell.
+# Cell magics whose body is not Python - discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
     "bash", "sh", "shell",
     "html", "javascript", "js", "svg", "latex", "markdown",
@@ -69,9 +69,9 @@ def is_generated_cell(source: str) -> bool:
     Reports whether a cell was injected by this tool rather than written by the user.
 
     The injected cells carry imports of their own - the software cell imports
-    bibliography, a LiPDGraph retrieval cell imports pylipd - and those are the
-    tool's own machinery, not the notebook's dependencies. Scanning them would
-    make a second run cite bibliography and pylipd, and pylipd has a citation on
+    provenance_agent.citations, a LiPDGraph retrieval cell imports pylipd - and
+    those are the tool's own machinery, not the notebook's dependencies.
+    Scanning them would make a second run cite pylipd, which has a citation on
     file, so the notebook would gain a citation for a library it never used.
 
     Args:
@@ -87,7 +87,27 @@ def is_generated_cell(source: str) -> bool:
 
 
 def strip_ipython_directives(code: str) -> str:
-    """Cleans a code cell so ast.parse() only sees valid Python."""
+    """
+    Cleans a code cell so ast.parse() only sees valid Python.
+
+    Notebook cells routinely contain IPython syntax that is not valid Python:
+    line magics (`%matplotlib inline`), cell magics (`%%time`), and shell
+    escapes (`!pip install ...`). Without stripping them, ast.parse() raises on
+    the whole cell and its real imports would be lost.
+
+    A line magic keeps its argument, because for magics like `%time x = f()`
+    the remainder is genuine Python. That means a magic whose argument is prose,
+    such as `%provenance cite the software`, leaves the bare words behind and
+    the cell still will not parse - which is why extract_libraries also has a
+    line-by-line recovery pass.
+
+    Args:
+        code: a notebook code cell's source text
+
+    Returns:
+        the source with directives removed, or "" when the whole cell is a
+        non-Python cell magic such as %%bash
+    """
     lines = code.splitlines()
     if not lines:
         return code
@@ -162,8 +182,19 @@ def extract_libraries(code: str) -> set[str]:
     """
     Extracts top-level package names imported in a Python source string.
 
+    Only the top-level package is kept, so `import matplotlib.pyplot as plt`
+    and `from matplotlib.pyplot import plot` both yield "matplotlib". Imports
+    anywhere in the source count, including inside a function body.
+
     Falls back to line-by-line import recovery when the source has a syntax
     error, so a broken cell still contributes its imports.
+
+    Args:
+        code: Python source, typically one notebook code cell
+
+    Returns:
+        the set of top-level package names imported, empty if there are none
+        or if nothing could be recovered from unparseable source
     """
     cleaned = strip_ipython_directives(code)
     try:
@@ -185,7 +216,7 @@ def validate_libraries(requested: list[str], available: list[str]) -> tuple[list
         available: library names returned by parse_notebook()
 
     Returns:
-        tuple of (found, not_found) — libraries that were/weren't in
+        tuple of (found, not_found) - libraries that were/weren't in
         the notebook
     """
     available_lower = {lib.lower() for lib in available}
@@ -201,12 +232,12 @@ def read_notebook_code(path: str) -> str:
     valid Python. Used by code-oriented workflow checks such as endpoint
     extraction.
 
+    Cells this tool injected are skipped, so a caller never sees the retrieval
+    scaffolding (_lipd_x = LiPD(), _meta_x = ...) and mistakes it for one of
+    the notebook's own dataset variables.
+
     Args:
         path: path to a .ipynb file
-
-    Cells this tool injected are skipped, so the detector never sees the
-    retrieval scaffolding (_lipd_x = LiPD(), _meta_x = ...) and mistake it for
-    one of the notebook's own dataset variables.
 
     Returns:
         the notebook's code cells joined by newlines, directives removed

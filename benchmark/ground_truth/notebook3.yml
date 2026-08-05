@@ -1,0 +1,30 @@
+notebook: notebooks/instructions/Notebook3/notebook3.ipynb
+software:
+  - ammonyte
+  - io
+  - matplotlib
+  - pandas
+  - pyleotups
+  - pylipd
+  - requests
+datasets:
+  - variable: dsp
+    tool: PyleoTUPS
+  - variable: lipd
+    tool: PyLiPD
+  - variable: df_graph
+    tool: LiPDGraph
+notes: |
+  The PyleoTUPS source object dsp retrieves study 890928 into df_data and
+  supplies the EW9209-3JPC series used in changepoint analysis. The local
+  Ng.EW9209-1JPC.2018.lpd file is loaded into lipd; its df time-series table
+  supplies the EW9209-1JPC series. The LiPDGraph query produces df_graph and
+  is displayed as the third data-gathering source before the comparison, so it
+  is retained even though the final rupture calculations use dsp and lipd.
+
+  The "Import libraries" code cell contains only a heading. The software list
+  is inferred from the later code and markdown: ammonyte (the amt.Series and
+  ruptures API), io, matplotlib (plt), pandas, pyleotups, pylipd, and requests.
+  The ruptures method is treated as an Ammonyte capability rather than a
+  separate direct import. Derived DataFrames, Series, interpolations, and
+  transition objects are not separate external dataset sources.
