@@ -24,14 +24,44 @@ Although this agent serves as a prototype for future integration into PaleoPAL, 
 
 ## Installation
 
-Requires Python 3.10 or newer. Clone the repository. 
+Requires Python 3.12 or newer. Clone the repository. 
 
 ```bash
 git clone https://github.com/LinkedEarth/provenance-agent.git
 cd provenance-agent
 ```
 
-Each command below installs an LLM provider alongside the package, since the
+
+### Recommended (new conda environment)
+
+To install in a new conda environment, run:
+
+```bash
+conda create -n provenance-agent python=3.12 pip
+conda activate provenance-agent
+
+python -m pip install -e ".[dev,google,data]"
+```
+
+[dev] adds pytest testing tools
+To install without:
+```bash
+pip install -e ".[google,data]"
+```
+[google] specifies the llm provider
+[data] also installs `pylipd` and `pyleotups`, which are needed only when
+the notebook kernel executes generated PyLiPD, LiPDGraph, or PyleoTUPS
+retrieval cells. 
+To install without:
+```bash
+pip install -e ".[dev, google,data]"
+```
+or
+```bash
+pip install -e ".[google]"
+```
+
+You may specify the LLM provider alongside the package, since the
 agent routing needs one. `google` is the default example; swap it for `openai`,
 `anthropic`, `ollama`, or `xai`.
 
@@ -48,23 +78,7 @@ Note on RuntimeError: LLM provider 'xai' needs the langchain_xai package, which 
 installed. Install it with: pip install "provenance-agent[xai]"
 ```
 
-A development environment is recommended; from the repository root run:
-
-```bash
-pip install -e ".[dev,google,data]"
-```
-
-For a runtime environment without test tools, run:
-
-```bash
-pip install -e ".[google,data]"
-```
-
-The `data` option installs `pylipd` and `pyleotups`, which are needed only when
-the notebook kernel executes generated PyLiPD, LiPDGraph, or PyleoTUPS
-retrieval cells. 
-
-
+You can also install without a conda environment, just don't create the conda environment.
 
 ### Before installing into an existing scientific environment
 
@@ -82,14 +96,6 @@ proposes changing conda-managed packages such as `numpy`, `pandas`,
 
 
 
-To install in a new conda environment, run:
-
-```bash
-conda create -n provenance-agent python=3.12 pip
-conda activate provenance-agent
-
-python -m pip install -e ".[dev,google,data]"
-```
 
 Regardless of installation option, **install into the same environment as the Jupyter kernel
 you analyze notebooks from.** The cell the software workflow injects imports
@@ -97,20 +103,43 @@ you analyze notebooks from.** The cell the software workflow injects imports
 new conda environment as above, register it as the kernel you run those notebooks
 in, and install your analysis libraries there too.
 
+**Note** If the environment does not appear in VS Code's notebook kernel picker, register
+it explicitly. Run these commands in the environment you want to use:
+
+To find the exact interpreter path, activate the environment and print the
+executable that will run the notebook:
+
+```bash
+conda activate provenance-agent
+python -c "import sys; print(sys.executable)"
+```
+
+This should print:
+`/opt/anaconda3/envs/provenance-agent/bin/python`
+
+Copy the printed path. In VS Code, run **Python: Select Interpreter** from the
+Command Palette, choose **Enter interpreter path...**, and paste or browse to
+that path. Then select the same interpreter for the notebook with **Select
+Kernel** → **Select Another Kernel...** → **Python Environments**. The Python
+interpreter and notebook kernel are separate selections, so set both when
+needed. If you are using a remote VS Code window, run the command in that same
+remote environment and use its path.
 
 Example notebooks may additionally require notebook-specific scientific packages such as `pyleoclim`, `xarray`, etc. that require further installation.
 
 
 
 
+
 ### Credentials
 
-Only the natural-language layers (`%provenance` and `agent.run`) call a model.
-`.env.example` lists the recognized names; copy or rename it to `.env` and
-fill in the one you need.
+Add an API Key to `.env.example` copy or rename it to `.env` and
+fill in the one you need. Only the natural-language layers (`%provenance` and `agent.run`) call a model.
 
 
 ## Usage
+
+We recommend starting in `notebooks/demos/.` Open `workflow.ipynb` to test functions explicity. Or, directly in `paleoPCAlite.ipynb` to start testing directly.
 
 ### From a Jupyter notebook
 
@@ -146,7 +175,6 @@ In VSCode:
 Choose File:Revert File. Make sure to save the file before if there are unsaved changes.
 
 Running the code cells will display DataFrames of citation metadata. For datasets, make sure the data loading and filtering cells in the notebook have been rerun.
-
 
 
 
@@ -291,7 +319,8 @@ The main runtime path is:
 - **Dataset detection has limited coverage.** It recognizes supported data
   loaders and analysis patterns; custom loaders, dynamic imports, and unused
   datasets may not be detected, and will report warnings.
-- **Software citation coverage is limited to the static index.** Libraries without an
+- **Software citation coverage is limited to the static index
+  ([Citations/](src/provenance_agent/Citations/)).** Libraries without an
   entry are reported as missing rather than receiving an automatically found
   citation. Additionally, trying to cite software libraries not imported in a notebook will return a warning.
 - **Citations are returned as data.** The workflows display citation metadata
