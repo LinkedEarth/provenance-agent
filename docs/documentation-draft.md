@@ -438,11 +438,11 @@ way to see what the agent thinks, with no LLM and no notebook mutation.
 
 ```bash
 # which libraries does it see?
-python -m provenance_agent.notebook_io notebooks/examples/paleoPCAlite.ipynb
+python -m provenance_agent.notebook_io notebooks/demos/paleoPCAlite.ipynb
 # Libraries: ['matplotlib', 'numpy', 'pandas', 'pyleoclim', ...]
 
 # which datasets does it detect?
-python -m provenance_agent.dataset_detection notebooks/examples/paleoPCAlite.ipynb
+python -m provenance_agent.dataset_detection notebooks/demos/paleoPCAlite.ipynb
 # filtered_df2    LiPDGraph
 
 # same, straight from the analyzer
@@ -625,7 +625,9 @@ provenance-agent/
 ├── notebooks/
 │   ├── demos/                      workflow.ipynb, the single demo/dev
 │   │                               notebook: software building blocks, data
-│   │                               building blocks, then the agent layer
+│   │                               building blocks, then the agent layer.
+│   │                               paleoPCAlite.ipynb sits beside it as the
+│   │                               notebook it runs against, edited in place
 │   ├── examples/                   worked science notebooks. Also the
 │   │                               detection corpus the test suite pins
 │   └── instructions/               NotebookN bundles, each self-contained with

@@ -210,7 +210,8 @@ example or test file.
 
 ```text
 notebooks/
-├── demos/                            # workflow.ipynb, the single demo/dev notebook
+├── demos/                            # workflow.ipynb, the single demo/dev notebook,
+│                                     # plus paleoPCAlite.ipynb, the notebook it edits
 ├── examples/                         # worked scientific notebooks and the deterministic-detection corpus
 └── instructions/                     # self-contained NotebookN bundles, each
                                       # with its own .lpd sibling
