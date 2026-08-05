@@ -54,6 +54,7 @@ Design decisions:
 """
 
 import glob
+import importlib.metadata
 import os
 import subprocess
 import sys
@@ -68,6 +69,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Enough to satisfy the eager client's "a key is set" check. It is never sent
 # anywhere: no test in this file makes a model call.
 FAKE_KEY = "not-a-real-key"
+
+
+def test_dataset_dependencies_are_optional():
+    """The data-retrieval packages belong to the opt-in data extra."""
+    requirements = importlib.metadata.requires("provenance-agent") or []
+
+    assert not any(
+        requirement.lower().startswith(("pylipd", "pyleotups"))
+        and not (
+            "extra ==" in requirement.lower()
+            and "data" in requirement.lower()
+        )
+        for requirement in requirements
+    )
+    assert any(
+        requirement.lower().startswith("pylipd")
+        and "extra ==" in requirement.lower()
+        and "data" in requirement.lower()
+        for requirement in requirements
+    )
+    assert any(
+        requirement.lower().startswith("pyleotups")
+        and "extra ==" in requirement.lower()
+        and "data" in requirement.lower()
+        for requirement in requirements
+    )
 
 
 def _run_isolated(code: str, cwd, extra_env: dict | None = None,

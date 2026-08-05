@@ -51,14 +51,19 @@ installed. Install it with: pip install "provenance-agent[xai]"
 A development environment is recommended; from the repository root run:
 
 ```bash
-pip install -e ".[dev,google]"
+pip install -e ".[dev,google,data]"
 ```
 
 For a runtime environment without test tools, run:
 
 ```bash
-pip install -e ".[google]"
+pip install -e ".[google,data]"
 ```
+
+The `data` extra installs `pylipd` and `pyleotups`, which are needed only when
+the notebook kernel executes generated PyLiPD, LiPDGraph, or PyleoTUPS
+retrieval cells. Core installs such as `.[dev,google]` are enough for notebook
+parsing, software citations, and deterministic dataset detection.
 
 To install in a new conda environment, run:
 
@@ -66,7 +71,7 @@ To install in a new conda environment, run:
 conda create -n provenance-agent python=3.12 pip
 conda activate provenance-agent
 
-python -m pip install -e ".[dev,google]"
+python -m pip install -e ".[dev,google,data]"
 ```
 
 Regardless of installation option, **install into the same environment as the Jupyter kernel
@@ -86,11 +91,13 @@ pip can silently replace conda-managed scientific packages with PyPI builds.
 If you are installing into an environment you care about, check first:
 
 ```bash
-pip install --dry-run -e ".[dev]"
+pip install --dry-run -e ".[dev,google,data]"
 ```
 
-The output should end with `Would install provenance-agent-0.1.0`. If it proposes changing `numpy`, `pandas`, `pylipd`, `pyleotups`, or
-`pyleoclim`, install with `--no-deps` instead and then run `pip check`.
+The output should end with `Would install provenance-agent-0.1.0`. If it
+proposes changing conda-managed packages such as `numpy`, `pandas`,
+`pylipd`, or `pyleotups`, install with `--no-deps` instead and then run
+`pip check`.
 
 
 ### Credentials
@@ -178,7 +185,7 @@ python benchmark/run_ground_truth.py --output /tmp/provenance-results.json
 ```text
 provenance-agent/
 ├── pyproject.toml                    # setuptools src-layout config; runtime dependencies,
-│                                     # the `dev` flag, one extra per optional LLM provider,
+│                                     # the `dev` and `data` extras, provider extras,
 │                                     # and Citations/ as package data
 ├── .gitignore                        # local secrets, build products, and generated files
 ├── LICENSE                           # project license

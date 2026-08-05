@@ -17,11 +17,13 @@ dependencies = [
   "pydantic",
   "ipython",
   "ipynbname",
-  "pylipd",
-  "pyleotups",
 ]
 
 [project.optional-dependencies]
+data = [
+  "pylipd",
+  "pyleotups",
+]
 dev = [
   "pytest",
 ]
