@@ -156,6 +156,16 @@ def _add_entry_row(
 
     Entries sharing a DOI with an already-added row are skipped; entries
     without a DOI are never deduplicated against each other.
+
+    Args:
+        rows: the accumulating row dicts, appended to in place
+        seen_dois: DOIs already added, updated in place
+        library: the library this citation belongs to
+        citation_type: "paper" or "software"
+        entry: one parsed bibtexparser entry dict
+
+    Returns:
+        None. Both rows and seen_dois are mutated in place.
     """
     doi = entry.get("doi", "")
     if doi and doi in seen_dois:

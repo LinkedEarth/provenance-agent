@@ -182,7 +182,20 @@ def _detect_dataset_pairs(notebook_path: str) -> list[list[str]]:
 
 
 def _warning_state(state: dict, message: str) -> dict:
-    """Marks a pipeline state as a no-op warning before dispatch."""
+    """
+    Marks a pipeline state as a no-op warning before dispatch.
+
+    Clears ``resolved`` and ``dispatch`` so the stages downstream find nothing
+    to run. That is what makes an unclear or unsatisfiable request leave the
+    notebook untouched rather than raising.
+
+    Args:
+        state: the pipeline state so far
+        message: the user-facing explanation of why nothing was done
+
+    Returns:
+        a new state with status "warning" and no work queued
+    """
     return {
         **state,
         "status": "warning",
@@ -312,7 +325,22 @@ def _snapshot_cells(notebook_path: str) -> Counter:
 
 
 def _new_cells(before: Counter, notebook) -> list:
-    """Returns cell instances added since a prior source multiset snapshot."""
+    """
+    Returns cell instances added since a prior source multiset snapshot.
+
+    Compares against a Counter rather than a set so a notebook that already
+    held two identical cells is handled correctly: each snapshot occurrence is
+    consumed once, and only genuinely new copies are reported.
+
+    Args:
+        before: a Counter of (cell_type, source) taken by _snapshot_cells
+            before dispatch ran
+        notebook: the nbformat notebook node as it stands after dispatch
+
+    Returns:
+        the cell nodes present now that the snapshot did not account for, in
+        notebook order
+    """
     remaining = before.copy()
     added = []
     for cell in notebook.cells:
@@ -390,7 +418,21 @@ def _verify(state: dict) -> dict:
 
 
 def _public_result(state: dict, verification: dict) -> dict:
-    """Builds the JSON-serializable result returned by the public API."""
+    """
+    Builds the JSON-serializable result returned by the public API.
+
+    ``warning`` is only present when there is one, so callers can test for the
+    key rather than for an empty value.
+
+    Args:
+        state: the finished pipeline state, carrying status, decision, and
+            dispatch records
+        verification: the static before/after comparison from _verify
+
+    Returns:
+        the envelope run() returns: status, decision, dispatch, verification,
+        and warning when the run produced one
+    """
     result = {
         "status": state.get("status", "ok"),
         "decision": state.get("decision"),

@@ -522,7 +522,23 @@ def _cite_data_tool_entry(
     fmt: str = "bibtex",
     output_path: str | None = None,
 ) -> list[list[str]]:
-    """Exposes cite_data to LangChain without its internal detector override."""
+    """
+    Exposes cite_data to LangChain without its internal detector override.
+
+    cite_data also accepts ``detected_pairs``, an internal hook the LCEL
+    pipeline uses to avoid running detection twice. Wrapping it here keeps that
+    parameter out of the tool's generated schema, so a model can never supply
+    it.
+
+    Args:
+        notebook_path: path to the .ipynb to analyze and modify
+        targets: None, one dataset name, or a list of them
+        fmt: accepted and ignored; see the module docstring
+        output_path: where to write the result (defaults to in place)
+
+    Returns:
+        the [variable, tool] pairs that had a retrieval cell injected
+    """
     return cite_data(
         notebook_path,
         targets=targets,
