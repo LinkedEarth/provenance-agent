@@ -825,13 +825,24 @@ provenance-agent/
 ### Ground truth
 
 `benchmark/ground_truth/` holds the expected software and dataset entries for
-each corpus notebook, as YAML. It is data only; the scoring runner that once
-read it was removed, so nothing checks these files and neither of the two
-mismatches below breaks a test. If you are using them as a reference for what
-the agent should find, know that they are currently wrong:
+each corpus notebook, as manually reasoned YAML. The repeatable evaluator reads
+those records and compares them with the current software-import and
+deterministic dataset detectors:
 
-- `dataset_pipeline.yml` expects `bibliography`, `notebook_parser`, and `sys`.
-  Those were only ever imported because the notebook carried a `sys.path.insert`
-  setup cell, which no longer exists.
-- `paleoPCAlite.yml` expects `eofs`, `fsspec`, `glob`, `nc_time_axis`, `s3fs`,
-  and `xarray`, none of which that notebook imports.
+```text
+/opt/anaconda3/envs/lang/bin/python benchmark/run_ground_truth.py
+```
+
+The command evaluates every record, prints per-notebook missing and unexpected
+values with precision/recall/F1, and writes the detailed report to
+`benchmark/results/ground_truth_results.json`. To evaluate one notebook, filter
+by a substring of its repository-relative path:
+
+```text
+/opt/anaconda3/envs/lang/bin/python benchmark/run_ground_truth.py \
+  --notebook Notebook1
+```
+
+Use `--ground-truth PATH` or `--output PATH` to override the input directory or
+JSON report location. The runner does not execute notebooks, alter the YAML
+labels, inject citation cells, call an LLM, or create `.bib` files.

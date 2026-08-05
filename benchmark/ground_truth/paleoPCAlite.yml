@@ -1,4 +1,4 @@
-notebook: notebooks/examples/paleoPCAlite.ipynb
+notebook: notebooks/demos/paleoPCAlite.ipynb
 software:
   - ast
   - cartopy
