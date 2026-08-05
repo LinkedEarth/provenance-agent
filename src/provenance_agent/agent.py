@@ -36,7 +36,18 @@ Design decisions:
       fail classification. The surface is held open for a future non-LLM APA
       implementation.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
-      the module-level ``chain`` uses the configured Gemini client.
+      the module-level ``chain`` uses the client configured in ``llm.py``.
+    - ``run(..., model=...)`` exposes that same injection point to callers. It
+      exists so an embedding application - PaleoPAL, eventually - can pass its
+      own chat client instead of the one this package configures, which keeps
+      ``llm.py``'s provider registry a standalone-mode default rather than a
+      competing abstraction that has to be removed on integration. Omitting the
+      argument reads the module-level ``chain`` at call time, so the default
+      path and monkeypatching both behave exactly as before. Note that
+      injecting a model does not yet avoid constructing the configured client:
+      importing this module imports ``llm``, which builds one eagerly. Making
+      that lazy is a separate change with user-visible consequences for when a
+      missing key is reported.
 """
 
 from __future__ import annotations
@@ -425,20 +436,31 @@ def _parser_warning_envelope(message: str) -> dict:
     }
 
 
-def run(request: str, notebook_path: str) -> dict:
+def run(
+    request: str,
+    notebook_path: str,
+    model: Runnable | None = None,
+) -> dict:
     """
     Runs the LCEL pipeline and returns its structured JSON envelope.
 
     Args:
         request: natural-language citation request
         notebook_path: notebook to inspect and mutate in place
+        model: optional LangChain Runnable to classify with. Omitting it uses
+            the module-level ``chain`` and therefore the configured provider;
+            passing one builds a chain around it instead, which is how an
+            embedding application supplies its own client.
 
     Returns:
         a JSON-serializable dictionary containing classification, dispatch, and
         static verification results
     """
+    # Read the module global at call time rather than binding it as a default,
+    # so monkeypatching ``chain`` still works.
+    active_chain = chain if model is None else build_chain(model)
     try:
-        return chain.invoke({
+        return active_chain.invoke({
             "request": request,
             "notebook_path": notebook_path,
         })

@@ -313,6 +313,64 @@ def test_run_returns_the_chain_envelope(monkeypatch):
     assert agent.run("whatever", SAMPLE) == expected
 
 
+# --- injected classification model --------------------------------------------
+
+def test_run_accepts_an_injected_model(tmp_path):
+    """
+    An embedding application supplies its own chat client. The injected model
+    classifies, and the rest of the pipeline runs normally against it.
+    """
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+
+    result = agent.run(
+        "cite the software", str(notebook), model=_fake_model(decision)
+    )
+
+    assert result["status"] == "ok"
+    assert "software" in result["verification"]["present"]
+
+
+def test_an_injected_model_bypasses_the_module_chain(tmp_path, monkeypatch):
+    """Passing a model must not touch the configured client's chain at all."""
+    notebook = tmp_path / "sample.ipynb"
+    shutil.copyfile(SAMPLE, notebook)
+
+    def detonate(*_args, **_kwargs):
+        raise AssertionError("the module-level chain was used despite model=")
+
+    monkeypatch.setattr(agent, "chain", RunnableLambda(detonate))
+
+    decision = {
+        "action": "cite",
+        "scope": "all",
+        "kinds": ["software"],
+        "targets": [],
+        "fmt": "bibtex",
+    }
+    result = agent.run(
+        "cite the software", str(notebook), model=_fake_model(decision)
+    )
+
+    assert result["status"] == "ok"
+
+
+def test_omitting_the_model_still_reads_the_module_chain(monkeypatch):
+    """The default path resolves `chain` at call time, so patching still wins."""
+    expected = {"status": "ok", "decision": None, "dispatch": [], "verification": {}}
+    monkeypatch.setattr(agent, "chain", RunnableLambda(lambda _input: expected))
+
+    assert agent.run("whatever", SAMPLE) == expected
+    assert agent.run("whatever", SAMPLE, model=None) == expected
+
+
 def test_rerun_with_unchanged_inputs_still_verifies(tmp_path, monkeypatch):
     """Re-running rewrites byte-identical cells, so no cell is *added*.
 

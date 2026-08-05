@@ -218,6 +218,13 @@ One thing name compatibility does not solve: PaleoPAL keeps its keys in
 notebook outside `paleopal/backend/` will not find that file. Copy the keys into
 a `.env` at the root of your notebook project.
 
+If you are embedding this agent rather than configuring it, skip the
+environment entirely and pass your own client to `run(..., model=...)`. That is
+the intended path for eventual integration: PaleoPAL builds its chat clients
+through `LLMProviderFactory` and wraps them in a `LangChainWrapper`, which is a
+LangChain `Runnable` and can be handed straight to `run`. See [Supplying your
+own model](#supplying-your-own-model).
+
 To construct a client yourself rather than through the environment:
 
 ```python
@@ -337,6 +344,32 @@ for call in result["dispatch"]:
 That is deliberate: `agent` builds the chat client at import time, so
 re-exporting it would make `import provenance_agent` require credentials for
 callers that only want the two direct functions.
+
+#### Supplying your own model
+
+`run` takes an optional third argument, `model`, which is any LangChain
+`Runnable` that returns a message. Passing one classifies with that model
+instead of the one `llm.py` configured:
+
+```python
+from provenance_agent.agent import run
+
+result = run("cite the software", "notebook.ipynb", model=my_chat_client)
+```
+
+Omitting it behaves exactly as before. This exists so an application embedding
+this agent can hand over the chat client it already built, rather than
+configuring a second one through `PROVENANCE_LLM_PROVIDER`. The provider
+registry then serves standalone use and gets out of the way when it is not
+wanted.
+
+Two caveats. The injected model is used only for classification; nothing else
+in the pipeline calls a model, so the rest of the run is unaffected. And
+injecting a model does **not** currently avoid constructing the configured
+client: importing `provenance_agent.agent` imports `llm`, which builds one
+eagerly, so a provider and key are still required to reach `run` at all.
+Deferring that is a separate change, because it would move the missing-key
+error from import time to first use.
 
 ### What the injected cells look like
 
@@ -715,6 +748,13 @@ provenance-agent/
   imports the client, which validates the key at construction. Which key depends
   on `PROVENANCE_LLM_PROVIDER`; the default is Google. The direct functions need
   nothing.
+- **Injecting a model does not yet avoid that.** `run(..., model=...)` chooses
+  what classifies the request, but the configured client is still constructed
+  when `provenance_agent.agent` is imported, so a provider and key are required
+  even by a caller that never uses them. Making the client lazy would fix this
+  and is deliberately not done yet: it moves the missing-key error from import
+  time to first use, which is a user-visible change worth making on purpose
+  rather than as a side effect.
 - **Only one model call is ever made, and only by the agent layer.** It
   classifies the request. Nothing else in the tool - detection, citation lookup,
   cell generation - consults a model, which is why the provider choice barely
