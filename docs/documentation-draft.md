@@ -628,11 +628,8 @@ provenance-agent/
 │   │                               building blocks, then the agent layer
 │   ├── examples/                   worked science notebooks. Also the
 │   │                               detection corpus the test suite pins
-│   ├── instructions/               NotebookN bundles, each self-contained with
-│   │                               its own .lpd sibling
-│   └── fixtures/                   .lpd data and Pages2k/ only. The test-input
-│                                   notebooks are built in code by
-│                                   tests/notebook_fixtures.py, not checked in
+│   └── instructions/               NotebookN bundles, each self-contained with
+│                                   its own .lpd sibling
 ├── benchmark/ground_truth/         expected software and dataset entries per
 │                                   notebook, as YAML. Data only; the scoring
 │                                   runner was removed

@@ -212,9 +212,8 @@ example or test file.
 notebooks/
 ├── demos/                            # workflow.ipynb, the single demo/dev notebook
 ├── examples/                         # worked scientific notebooks and the deterministic-detection corpus
-├── instructions/                     # self-contained NotebookN bundles
-└── fixtures/                         # .lpd datasets and Pages2k/ only; the test
-                                      # notebooks are built by tests/notebook_fixtures.py
+└── instructions/                     # self-contained NotebookN bundles, each
+                                      # with its own .lpd sibling
 ```
 
 ### Test reference tree
