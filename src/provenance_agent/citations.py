@@ -253,6 +253,20 @@ def remove_provenance_cells(nb, frame: str) -> None:
         frame: the bound frame name, SOFTWARE_FRAME or DATASETS_FRAME
     """
     def belongs_to_frame(cell) -> bool:
+        """
+        Reports whether one cell is the injected cell for ``frame``.
+
+        The software cell is found by its binding, ``provenance_software = ``.
+        The data cell needs the second branch because it does not bind
+        DATASETS_FRAME at all - it binds one _bib_/_meta_ pair per source - so
+        it is recognized as a generated cell that is not the software one.
+
+        Args:
+            cell: an nbformat cell node
+
+        Returns:
+            True if this cell is the previously injected cell for ``frame``
+        """
         if cell.cell_type != "code":
             return False
         if f"{frame} = " in cell.source:
