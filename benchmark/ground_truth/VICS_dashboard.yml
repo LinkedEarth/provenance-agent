@@ -1,4 +1,4 @@
-notebook: notebooks/comparing-simulated-reconstructed-climate/VICS_dashboard.ipynb
+notebook: notebooks/examples/comparing-simulated-reconstructed-climate/VICS_dashboard.ipynb
 software:
   - cartopy
   - cftime

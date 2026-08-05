@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "provenance-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "nbformat",
+  "bibtexparser",
+  "PyYAML",
+  "pandas",
+  "requests",
+  "python-dotenv",
+  "langchain-core",
+  "langchain-google-genai",
+  "pydantic",
+  "ipython",
+  "ipynbname",
+  "pylipd",
+  "pyleotups",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["provenance"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+provenance_agent = ["Citations/**/*"]

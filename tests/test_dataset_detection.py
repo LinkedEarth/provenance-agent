@@ -20,15 +20,10 @@ Design Decisions:
       degrade gracefully instead of crashing.
 """
 
-import os
-import sys
-
 import nbformat
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from dataset_detection import (
+from provenance_agent.dataset_detection import (
     build_detection_prompt,
     detect_datasets,
     parse_detection_response,

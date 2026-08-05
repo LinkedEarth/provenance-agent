@@ -7,15 +7,11 @@ scientific libraries themselves.
 """
 
 import inspect
-import os
-import sys
 from pathlib import Path
 
 import nbformat
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from deterministic_dataset_detection import (
+from provenance_agent.deterministic_dataset_detection import (
     detect_datasets_in_notebook,
     detect_datasets_with_diagnostics,
 )
@@ -107,6 +103,213 @@ pca = mgs_common.pca()
     ]
 
 
+def test_no_analysis_uses_latest_filtered_table_boundary(tmp_path):
+    notebook = tmp_path / "filtered_only.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+filtered = raw[raw["value"].notna()]
+final = filtered.drop_duplicates(subset=["id"]).reset_index(drop=True)
+display(final)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["final", "pandas"]]
+
+
+def test_parallel_terminal_tables_report_all_leaves(tmp_path):
+    notebook = tmp_path / "parallel_tables.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+warm = raw[raw["temperature"] > 0]
+cold = raw[raw["temperature"] < 0]
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["warm", "pandas"],
+        ["cold", "pandas"],
+    ]
+
+
+def test_dead_terminal_table_binding_is_not_reported(tmp_path):
+    notebook = tmp_path / "dead_table.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+df = pd.read_csv("records.csv")
+df = 42
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
+def test_live_terminal_tables_from_branch_and_loop_are_reported(tmp_path):
+    notebook = tmp_path / "live_branch_tables.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+if True:
+    branch_df = pd.read_csv("branch.csv")
+
+for filename in ["loop.csv"]:
+    loop_df = pd.read_csv(filename)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["branch_df", "pandas"],
+        ["loop_df", "pandas"],
+    ]
+
+
+def test_analyzed_source_does_not_fallback_to_unused_sibling(tmp_path):
+    notebook = tmp_path / "analyzed_branch_and_sibling.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+
+raw = pd.read_csv("records.csv")
+used = raw[raw["used"]]
+unused = raw[raw["unused"]]
+fit = SomeModel().fit(used)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["used", "pandas"]]
+
+
+def test_terminal_fallback_is_per_source_alongside_resolved_analysis(tmp_path):
+    notebook = tmp_path / "mixed_sources.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pandas as pd
+import xarray as xr
+
+main = xr.open_dataset("main.nc")
+solver = Eof(main)
+scratch = pd.read_csv("lookup.csv")
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["main", "xarray"],
+        ["scratch", "pandas"],
+    ]
+
+
+def test_bare_merge_does_not_promote_a_pylipd_source(tmp_path):
+    notebook = tmp_path / "bare_merge.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+from mylib import merge
+
+D = LiPD()
+D.load("x.lpd")
+out = merge(D, 1)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
+def test_bare_dataframe_does_not_promote_a_pylipd_source(tmp_path):
+    notebook = tmp_path / "bare_dataframe.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+from someorm import DataFrame
+
+D = LiPD()
+D.load("x.lpd")
+out = DataFrame(D)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == []
+
+
+def test_sparql_dataframe_helpers_produce_one_result_per_query(tmp_path):
+    notebook = tmp_path / "sparql_helpers.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from SPARQLWrapper import SPARQLWrapper, JSON
+import pandas as pd
+
+def fetch_sparql(endpoint_url, query):
+    sparql = SPARQLWrapper(endpoint_url)
+    sparql.setQuery(query)
+    sparql.setReturnFormat(JSON)
+    results = sparql.query().convert()
+    return pd.DataFrame(results["results"]["bindings"])
+
+endpoint = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+first = fetch_sparql(endpoint, "first")
+first_filtered = first.drop_duplicates(subset=["id"])
+second = fetch_sparql(endpoint, "second")
+second_filtered = second[second["value"].notna()]
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["first_filtered", "LiPDGraph"],
+        ["second_filtered", "LiPDGraph"],
+    ]
+
+
+def test_direct_sparqlwrapper_dataframe_is_a_lipdgraph_source(tmp_path):
+    notebook = tmp_path / "direct_sparql.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from SPARQLWrapper import SPARQLWrapper, JSON
+import pandas as pd
+
+endpoint = "https://linkedearth.graphdb.mint.isi.edu/repositories/LiPDVerse-dynamic"
+sparql = SPARQLWrapper(endpoint)
+sparql.setReturnFormat(JSON)
+result = sparql.query().convert()
+final = pd.DataFrame(result["results"]["bindings"])
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["final", "LiPDGraph"]]
+
+
+def test_pyleotups_get_data_with_explicit_study_id_activates_source(tmp_path):
+    notebook = tmp_path / "direct_pyleotups_data.ipynb"
+    _write_notebook(
+        notebook,
+        """
+import pyleotups as pt
+
+ds = pt.PangaeaDataset()
+data = ds.get_data(study_id="830587")[0]
+fit = SomeModel().fit(data)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [["ds", "PyleoTUPS"]]
+
+
 def test_unused_pylipd_load_is_omitted_without_analysis(tmp_path):
     notebook = tmp_path / "unused_lipd.ipynb"
     _write_notebook(
@@ -141,6 +344,28 @@ result = series.pca()
     )
 
     assert detect_datasets_in_notebook(str(notebook)) == [["D", "PyLiPD"]]
+
+
+def test_pylipd_get_timeseries_requires_dataframe_flag_for_table_fallback(tmp_path):
+    notebook = tmp_path / "pylipd_timeseries_return_types.ipynb"
+    _write_notebook(
+        notebook,
+        """
+from pylipd.lipd import LiPD
+
+D = LiPD()
+D.load("dataset.lpd")
+default_result = D.get_timeseries(["dataset"])
+disabled_result = D.get_timeseries(["dataset"], to_dataframe=False)
+keyword_frame = D.get_timeseries(["dataset"], to_dataframe=True)
+positional_frame = D.get_timeseries(["dataset"], True)
+""",
+    )
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["keyword_frame", "PyLiPD"],
+        ["positional_frame", "PyLiPD"],
+    ]
 
 
 def test_pyleotups_search_without_analysis_is_omitted(tmp_path):
@@ -197,7 +422,7 @@ solver = Eof(signal)
     assert detect_datasets_in_notebook(str(notebook)) == [["ds_geo", "xarray"]]
 
 
-def test_inspection_and_plotting_methods_are_not_analysis_sinks(tmp_path):
+def test_inspection_and_plotting_methods_report_terminal_table(tmp_path):
     notebook = tmp_path / "inspection_only.ipynb"
     _write_notebook(
         notebook,
@@ -218,7 +443,7 @@ df.plot()
 """,
     )
 
-    assert detect_datasets_in_notebook(str(notebook)) == []
+    assert detect_datasets_in_notebook(str(notebook)) == [["df", "LiPDGraph"]]
 
 
 def test_merged_pyleotups_objects_report_terminal_merged_name(tmp_path):
@@ -281,7 +506,7 @@ display(_meta_D)
 
 def test_repository_paleo_pca_lite_fixture_matches_terminal_expectation():
     repository_root = Path(__file__).resolve().parents[1]
-    notebook = repository_root / "notebooks/testing/paleoPCAlite.ipynb"
+    notebook = repository_root / "notebooks/examples/paleoPCAlite.ipynb"
 
     assert detect_datasets_in_notebook(str(notebook)) == [
         ["filtered_df2", "LiPDGraph"]
@@ -290,9 +515,20 @@ def test_repository_paleo_pca_lite_fixture_matches_terminal_expectation():
 
 def test_repository_paleo_pca_fixture_reports_both_analysis_sources():
     repository_root = Path(__file__).resolve().parents[1]
-    notebook = repository_root / "notebooks/testing/paleoPCA.ipynb"
+    notebook = repository_root / "notebooks/examples/paleoPCA.ipynb"
 
     assert detect_datasets_in_notebook(str(notebook)) == [
         ["filtered_df2", "LiPDGraph"],
         ["ds_geo", "xarray"],
+    ]
+
+
+def test_repository_query_lipd_graph_fixture_reports_each_query_lineage():
+    repository_root = Path(__file__).resolve().parents[1]
+    notebook = repository_root / "notebooks/examples/02a-query_lipd_graph.ipynb"
+
+    assert detect_datasets_in_notebook(str(notebook)) == [
+        ["df_search", "LiPDGraph"],
+        ["sparql_results_1767729896_fbfadce4_unique_TSiD", "LiPDGraph"],
+        ["sparql_results_1767730535_65f2d398", "LiPDGraph"],
     ]

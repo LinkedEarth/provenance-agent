@@ -1,4 +1,4 @@
-notebook: notebooks/comparing-simulated-reconstructed-climate/data_from_esm_cloudcat.ipynb
+notebook: notebooks/examples/comparing-simulated-reconstructed-climate/data_from_esm_cloudcat.ipynb
 software:
   - cftime
   - collections

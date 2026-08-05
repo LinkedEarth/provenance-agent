@@ -1,4 +1,4 @@
-notebook: notebooks/comparing-simulated-reconstructed-climate/CMIP6_LMR.ipynb
+notebook: notebooks/examples/comparing-simulated-reconstructed-climate/CMIP6_LMR.ipynb
 software:
   - cartopy
   - cftime

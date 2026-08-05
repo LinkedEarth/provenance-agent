@@ -1,4 +1,4 @@
-notebook: notebooks/testing/PyleoTUPS.ipynb
+notebook: notebooks/exploration/PyleoTUPS.ipynb
 software:
   - pyleotups
 datasets:

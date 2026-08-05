@@ -9,13 +9,9 @@ form), and both shapes must normalize to the same text. Fake messages are
 built with SimpleNamespace so no model call happens.
 """
 
-import os
-import sys
 from types import SimpleNamespace
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from llm import message_text
+from provenance_agent.llm import message_text
 
 
 def test_message_text_plain_string():

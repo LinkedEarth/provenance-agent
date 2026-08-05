@@ -1,4 +1,4 @@
-notebook: notebooks/Graph.ipynb
+notebook: notebooks/exploration/Graph.ipynb
 software:
   - ast
   - io

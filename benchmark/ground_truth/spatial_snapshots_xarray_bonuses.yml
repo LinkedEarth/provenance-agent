@@ -1,4 +1,4 @@
-notebook: notebooks/comparing-simulated-reconstructed-climate/spatial_snapshots_xarray_bonuses.ipynb
+notebook: notebooks/examples/comparing-simulated-reconstructed-climate/spatial_snapshots_xarray_bonuses.ipynb
 software:
   - cartopy
   - cftime
