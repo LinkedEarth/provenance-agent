@@ -15,12 +15,14 @@ Implementation:
 
 Design decisions:
     - The LangChain tools and the LCEL router are deliberately NOT re-exported.
-      ``provenance_agent.agent`` constructs the shared Gemini client at import
-      time, so re-exporting ``run`` here would make ``import provenance_agent``
-      require credentials even for callers that only want the direct functions.
-      They stay at ``provenance_agent.agent.run``,
-      ``provenance_agent.data.cite_data_tool``, and
-      ``provenance_agent.software.cite_software_tool``.
+      Re-exporting ``run`` here would put the routing layer, its LangChain
+      dependencies, and its provider configuration on the import path of every
+      caller that only wants the two direct functions. They stay at
+      ``provenance_agent.agent.run``, ``provenance_agent.data.cite_data_tool``,
+      and ``provenance_agent.software.cite_software_tool``.
+      Note that importing the agent no longer costs credentials either - the
+      chat client is built on first use, not at import - so this separation is
+      about dependency weight rather than about credentials.
     - Each function is imported from the module that implements it, not from a
       routing module in between. There is no longer an ``orchestrator`` layer to
       pass through.

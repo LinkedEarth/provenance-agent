@@ -33,10 +33,10 @@ Design decisions:
     - The registry is a lazy import table rather than langchain's
       `init_chat_model`. `init_chat_model` lives in the `langchain` umbrella
       package, which this project deliberately does not depend on - only
-      `langchain-core` plus one integration. A dict of four entries buys the
+      `langchain-core` plus one integration. A dict of five entries buys the
       same provider-agnosticism without that dependency.
     - No LLM integration is a hard dependency, not even the default provider's.
-      All four are optional extras (`pip install "provenance-agent[openai]"`)
+      All five are optional extras (`pip install "provenance-agent[openai]"`)
       imported only when selected, so a user never installs a provider they will
       not use - which matters because `langchain-google-genai` pulls
       `google-genai` and `google-auth`, and this package is routinely installed

@@ -51,11 +51,11 @@ Design decisions:
       ``llm.py``'s provider registry a standalone-mode default rather than a
       competing abstraction that has to be removed on integration. Omitting the
       argument reads the module-level ``chain`` at call time, so the default
-      path and monkeypatching both behave exactly as before. Note that
-      injecting a model does not yet avoid constructing the configured client:
-      importing this module imports ``llm``, which builds one eagerly. Making
-      that lazy is a separate change with user-visible consequences for when a
-      missing key is reported.
+      path and monkeypatching both behave exactly as before. Injecting a model
+      also avoids constructing the configured client entirely: importing this
+      module imports ``llm`` but never reads its lazy ``llm`` attribute, so a
+      caller that always passes ``model=`` never builds one and needs neither
+      ``PROVENANCE_LLM_PROVIDER`` nor a key.
 """
 
 from __future__ import annotations
@@ -408,7 +408,7 @@ def build_chain(model: Runnable | None = None) -> Runnable:
 
     Args:
         model: optional LangChain Runnable used for classification; omitted uses
-            the configured Gemini client.
+            the client configured in llm.py, built on first use.
 
     Returns:
         a Runnable composed as prepare_context | classify | resolve_targets |

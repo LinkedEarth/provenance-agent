@@ -38,8 +38,9 @@ Design decisions:
       notebook; this module only resolves the notebook path and renders the
       result. It imports `agent` and nothing else from the project, so the
       routing contract stays in one place. Importing this module therefore
-      imports the agent and its LLM client; the direct `cite_data` /
-      `cite_software` functions on the package root deliberately do not.
+      imports the agent, but not a chat client: that is built on first model
+      use, so `%load_ext provenance` succeeds with no credentials configured
+      and a missing key surfaces at the first `%provenance` request instead.
     - The logic is module-level functions rather than methods on the Magics
       class, so tests exercise it without constructing an IPython shell.
     - UsageError (not RuntimeError) for user mistakes: IPython renders it as a

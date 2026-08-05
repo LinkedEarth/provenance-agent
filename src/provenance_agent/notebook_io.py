@@ -44,7 +44,7 @@ import warnings
 
 import nbformat
 
-# Cell magics whose body is not Python — discard the entire cell.
+# Cell magics whose body is not Python - discard the entire cell.
 _NON_PYTHON_CELL_MAGICS = frozenset({
     "bash", "sh", "shell",
     "html", "javascript", "js", "svg", "latex", "markdown",
@@ -185,7 +185,7 @@ def validate_libraries(requested: list[str], available: list[str]) -> tuple[list
         available: library names returned by parse_notebook()
 
     Returns:
-        tuple of (found, not_found) — libraries that were/weren't in
+        tuple of (found, not_found) - libraries that were/weren't in
         the notebook
     """
     available_lower = {lib.lower() for lib in available}
