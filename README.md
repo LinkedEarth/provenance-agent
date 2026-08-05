@@ -17,7 +17,9 @@ Although this agent serves as a prototype for future integration into PaleoPAL, 
 
 ## Other Documentation
 
-| [`docs/design-decisions.md`](docs/design-decisions.md) | why the project is built this way, project-wide and per module |
+| Document | Covers |
+|---|---|
+| [`docs/design-decisions-summary.md`](docs/design-decisions-summary.md) | why the project is built this way, and what each file is for |
 | [`docs/paleopal-integration.md`](docs/paleopal-integration.md) | notes on folding this agent into PaleoPAL |
 
 ## Installation
@@ -136,6 +138,38 @@ Choose File:Revert File. Make sure to save the file before if there are unsaved 
 Running the code cells will display DataFrames of citation metadata. For datasets, make sure the data loading and filtering cells in the notebook have been rerun.
 
 
+
+
+## Testing and benchmarking
+
+Run the test suite from the repository root in the development environment:
+
+```bash
+python -m pytest tests/ -q
+```
+
+The tests do not require LLM credentials.
+In the project environment, run:
+
+```bash
+ -m pytest tests/ -q
+```
+
+The benchmark evaluates the deterministic software and dataset detectors
+against the curated records in `benchmark/ground_truth/`. 
+
+```bash
+python benchmark/run_ground_truth.py
+```
+
+The command prints precision, recall, and F1 scores and writes the detailed
+JSON report to `benchmark/results/ground_truth_results.json`. To evaluate one
+notebook or choose a different report path:
+
+```bash
+python benchmark/run_ground_truth.py --notebook paleoPCAlite
+python benchmark/run_ground_truth.py --output /tmp/provenance-results.json
+```
 
 
 ## Technical details

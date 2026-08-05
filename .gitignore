@@ -7,6 +7,10 @@ CLAUDE.md
 src/.env
 .worktrees/
 docs/superpowers/
+docs/design-decisions.md
+docs/documentation-draft.md
+.claude/
+.vscode/
 build/
 dist/
 *.egg-info/
