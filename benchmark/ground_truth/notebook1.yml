@@ -1,0 +1,33 @@
+notebook: notebooks/instructions/Notebook1/notebook1.ipynb
+software:
+  - ast
+  - io
+  - numpy
+  - pandas
+  - pyleoclim
+  - pyleotups
+  - pylipd
+  - requests
+datasets:
+  - variable: df1
+    tool: LiPDGraph
+  - variable: ds
+    tool: PyleoTUPS
+  - variable: D
+    tool: PyLiPD
+notes: |
+  The exercise compares three Mg/Ca records. The LiPDGraph query is posted to
+  the LinkedEarth endpoint, parsed into df, filtered by time_TSID, and
+  deduplicated into df1; df1 is the table used to build ts_1, so it is the
+  terminal LiPDGraph variable. The PyleoTUPS source object ds retrieves study
+  831197 into df_data, which is used to build ts_2. The local file
+  MD98_2176.Stott.2007.lpd is loaded into D; its derived df3 and ts_list feed
+  ts_3, so D is the terminal PyLiPD source object rather than the derived
+  DataFrames.
+
+  The first code cell is only an "Import libraries" heading, so the software
+  list is inferred from the libraries required by the later code: ast, io,
+  numpy, pandas, pyleoclim, pyleotups, pylipd, and requests. The final
+  provenance-agent-generated cell is excluded; its pylipd import is generated
+  output, not an original notebook dependency. display is treated as the
+  notebook environment rather than a separately imported software package.

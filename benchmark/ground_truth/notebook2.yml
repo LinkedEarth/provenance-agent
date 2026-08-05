@@ -1,0 +1,33 @@
+notebook: notebooks/instructions/Notebook2/notebook2.ipynb
+software:
+  - io
+  - matplotlib
+  - pandas
+  - pyleoclim
+  - pyleotups
+  - pylipd
+  - requests
+  - scipy
+datasets:
+  - variable: ds
+    tool: PyleoTUPS
+  - variable: df_graph
+    tool: LiPDGraph
+  - variable: lipd
+    tool: PyLiPD
+notes: |
+  The PyleoTUPS source object ds retrieves study 990385 into df_data. The
+  depth-to-age interpolation is built from that data and applied to the local
+  Vostok record, so ds is the PyleoTUPS source variable. The SPARQL response
+  is parsed into df_graph and inspected to identify the Vostok records and
+  their time span; it is retained as a LiPDGraph source even though the final
+  plotted comparison uses the local record and the PyleoTUPS age model. The
+  sibling Vostok.Bazin.2013.lpd file is loaded into lipd, whose df_l output
+  feeds ts_2013 and ts_2023, so lipd is the PyLiPD source variable.
+
+  The "Import libraries" code cell contains only a heading. Software is
+  therefore inferred from the later symbols and documented task: io,
+  matplotlib (plt), pandas (pd), pyleoclim (pyleo), pyleotups (pt), pylipd
+  (LiPD), requests, and scipy (CubicSpline). The SPARQL query itself uses
+  requests rather than SPARQLWrapper. Derived Series and DataFrames are not
+  separate dataset sources.

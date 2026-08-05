@@ -1,0 +1,31 @@
+notebook: notebooks/examples/02a-query_lipd_graph.ipynb
+software:
+  - IPython
+  - SPARQLWrapper
+  - io
+  - json
+  - pandas
+  - requests
+datasets:
+  - variable: df_search
+    tool: LiPDGraph
+  - variable: sparql_results_1767729896_fbfadce4_unique_TSiD
+    tool: LiPDGraph
+  - variable: sparql_results_1767730535_65f2d398
+    tool: LiPDGraph
+notes: |
+  The notebook makes three independent queries to the LiPDGraph endpoint and
+  turns each response into a pandas DataFrame. df_search is the result of the
+  first Temp12k query and is inspected with head() and len(). The second query
+  is first held in sparql_results_1767729896_fbfadce4, then deduplicated by TSiD
+  into sparql_results_1767729896_fbfadce4_unique_TSiD; the deduplicated frame is
+  the terminal table shown after that query. The third query is held in
+  sparql_results_1767730535_65f2d398 and is inspected through its length and
+  unique-value checks. All three sources are LiPDGraph data, not local LiPD
+  objects.
+
+  The software list follows the code cells: json, requests, pandas, and io are
+  imported in the first query cell; SPARQLWrapper and pandas are imported in
+  the repeated helper cells; and IPython.display is imported in the
+  deduplication cell. Markdown @agent prompts and commented examples do not
+  add software entries.

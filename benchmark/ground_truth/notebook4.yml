@@ -1,0 +1,31 @@
+notebook: notebooks/instructions/Notebook4/notebook4.ipynb
+software:
+  - ast
+  - io
+  - matplotlib
+  - numpy
+  - pandas
+  - pyleoclim
+  - pyleotups
+  - pylipd
+  - requests
+datasets:
+  - variable: D_ice
+    tool: LiPDGraph
+  - variable: dsp
+    tool: PyleoTUPS
+  - variable: D
+    tool: PyLiPD
+notes: |
+  The LiPDGraph response is stored in D_t12k, filtered to Huascaran, and
+  reduced to the selected row D_ice; D_ice supplies ts_huasc and is therefore
+  the terminal LiPDGraph variable. The PyleoTUPS source object dsp retrieves
+  study 951386 into df_data, which supplies the Shackleton series ts_shack.
+  The sibling Botuvera.Brazil.2005.lpd file is loaded into D, then reduced
+  through df and df_cut to ts_botu; D remains the PyLiPD source variable.
+
+  The "Import libraries" code cell contains only a heading. Software is
+  inferred from the later code: ast, io, matplotlib (plt), numpy, pandas,
+  pyleoclim (pyleo), pyleotups (pt), pylipd (LiPD), and requests. The spectral
+  products and Pyleoclim Series objects are derived results, not additional
+  external sources.

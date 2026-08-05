@@ -2,20 +2,14 @@ notebook: notebooks/examples/paleoPCAlite.ipynb
 software:
   - ast
   - cartopy
-  - eofs
-  - fsspec
-  - glob
   - io
   - json
   - matplotlib
-  - nc_time_axis
   - numpy
   - pandas
   - pathlib
   - pyleoclim
   - requests
-  - s3fs
-  - xarray
 datasets:
   - variable: filtered_df2
     tool: LiPDGraph
@@ -28,6 +22,10 @@ notes: |
   rule the terminal dataset variable is filtered_df2 (still a DataFrame), not
   df_res. The downstream mgs/mgs_common/pca objects are pyleoclim conversions
   and derived results, so they are excluded.
-  Several imports (s3fs, fsspec, xarray, glob, ast, pathlib, eofs,
-  nc_time_axis) are never used in this lite notebook's code, but they appear
-  on import lines so they are listed. This notebook has no %%-magic cells.
+  The software list follows the current executable import cells: ast, cartopy,
+  io, json, matplotlib, numpy, pandas, pathlib, pyleoclim, and requests.
+  eofs, fsspec, glob, nc_time_axis, s3fs, and xarray occur in the prose or
+  reference material but are not imported by this lite notebook, so they are
+  not listed. The generated provenance cells are excluded from software
+  extraction; they are outputs of this repository rather than notebook
+  dependencies. This notebook has no %%-magic cells.
