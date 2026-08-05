@@ -10,14 +10,13 @@ callers even though the model is no longer bound to those tools.
 
 import json
 import nbformat
-import os
 import shutil
 
 from provenance_agent import agent
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
+from notebook_fixtures import SAMPLE
 
 
 def test_classifier_prompt_is_json_only_and_uses_context():

@@ -513,16 +513,6 @@ def test_repository_paleo_pca_lite_fixture_matches_terminal_expectation():
     ]
 
 
-def test_repository_paleo_pca_fixture_reports_both_analysis_sources():
-    repository_root = Path(__file__).resolve().parents[1]
-    notebook = repository_root / "notebooks/examples/paleoPCA.ipynb"
-
-    assert detect_datasets_in_notebook(str(notebook)) == [
-        ["filtered_df2", "LiPDGraph"],
-        ["ds_geo", "xarray"],
-    ]
-
-
 def test_repository_query_lipd_graph_fixture_reports_each_query_lineage():
     repository_root = Path(__file__).resolve().parents[1]
     notebook = repository_root / "notebooks/examples/02a-query_lipd_graph.ipynb"

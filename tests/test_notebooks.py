@@ -52,10 +52,18 @@ def _notebook_id(path: Path) -> str:
 
 
 def test_the_notebook_tree_is_not_empty():
-    """Guards the guard: an empty glob would make every check below vacuous."""
-    assert len(NOTEBOOKS) > 20
+    """
+    Guards the guard: an empty glob would make every check below vacuous.
+
+    The count is a floor rather than the exact size, so adding a notebook does
+    not fail the suite. It dropped when the four workflow demos were merged into
+    one and the scratch notebooks under exploration/ were removed; fixtures/ no
+    longer holds notebooks either, because the test inputs are now built in code
+    by tests/notebook_fixtures.py.
+    """
+    assert len(NOTEBOOKS) > 10
     directories = {path.relative_to(REPO_ROOT / "notebooks").parts[0] for path in NOTEBOOKS}
-    assert directories == {"demos", "examples", "exploration", "fixtures", "instructions"}
+    assert directories == {"demos", "examples", "instructions"}
 
 
 def test_no_notebook_is_left_outside_the_new_layout():

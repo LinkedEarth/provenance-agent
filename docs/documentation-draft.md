@@ -438,15 +438,15 @@ way to see what the agent thinks, with no LLM and no notebook mutation.
 
 ```bash
 # which libraries does it see?
-python -m provenance_agent.notebook_io notebooks/fixtures/sample.ipynb
-# Libraries: ['matplotlib', 'numpy', 'pandas', 'pyleoclim']
+python -m provenance_agent.notebook_io notebooks/examples/paleoPCAlite.ipynb
+# Libraries: ['matplotlib', 'numpy', 'pandas', 'pyleoclim', ...]
 
 # which datasets does it detect?
 python -m provenance_agent.dataset_detection notebooks/examples/paleoPCAlite.ipynb
 # filtered_df2    LiPDGraph
 
 # same, straight from the analyzer
-python -m provenance_agent.deterministic_dataset_detection notebooks/examples/paleoPCA.ipynb
+python -m provenance_agent.deterministic_dataset_detection notebooks/examples/02a-query_lipd_graph.ipynb
 ```
 
 ### "It found no datasets" - ask the detector why
@@ -541,7 +541,7 @@ import shutil
 shutil.copy("notebook.ipynb", "notebook_demo.ipynb")
 ```
 
-The demo notebooks under `notebooks/demos/` do this already.
+`notebooks/demos/workflow.ipynb` does this already.
 
 ---
 
@@ -623,16 +623,16 @@ provenance-agent/
 │       └── Citations/              packaged citation data: library_citations.yml
 │                                   (the index) plus one .bib per library
 ├── notebooks/
-│   ├── demos/                      the four workflow demos: software_workflow,
-│   │                               data_workflow, overall_workflow,
-│   │                               provenance_magic
+│   ├── demos/                      workflow.ipynb, the single demo/dev
+│   │                               notebook: software building blocks, data
+│   │                               building blocks, then the agent layer
 │   ├── examples/                   worked science notebooks. Also the
 │   │                               detection corpus the test suite pins
 │   ├── instructions/               NotebookN bundles, each self-contained with
 │   │                               its own .lpd sibling
-│   ├── fixtures/                   test inputs: sample.ipynb,
-│   │                               test_magic_commands.ipynb, Pages2k/, .lpd
-│   └── exploration/                scratch and single-library investigation
+│   └── fixtures/                   .lpd data and Pages2k/ only. The test-input
+│                                   notebooks are built in code by
+│                                   tests/notebook_fixtures.py, not checked in
 ├── benchmark/ground_truth/         expected software and dataset entries per
 │                                   notebook, as YAML. Data only; the scoring
 │                                   runner was removed

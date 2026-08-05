@@ -120,7 +120,7 @@ Must be done first to import the `provenance` module.
 ```
 Is an optional command to set the the notebook path to cite; by default it is the current notebook.
 
-- **VS Code may not detect the current notebook automatically.** Set the path
+ **VS Code may not detect the current notebook automatically.** Set the path
   explicitly with `%provenance_notebook path/to/notebook.ipynb` when needed.
 
 ```python
@@ -133,7 +133,7 @@ In VSCode:
 - Windows: Ctrl+Shift+P
 Choose File:Revert File. Make sure to save the file before if there are unsaved changes.
 
-Running the code cells will display DataFrames of citation metadata.
+Running the code cells will display DataFrames of citation metadata. For datasets, make sure the data loading and filtering cells in the notebook have been rerun.
 
 
 
@@ -210,11 +210,11 @@ example or test file.
 
 ```text
 notebooks/
-├── demos/                            # the four workflow demos
+├── demos/                            # workflow.ipynb, the single demo/dev notebook
 ├── examples/                         # worked scientific notebooks and the deterministic-detection corpus
 ├── instructions/                     # self-contained NotebookN bundles
-├── fixtures/                         # test notebooks, bibliography files, Pages2k/, and .lpd datasets
-└── exploration/                      # scratch notebooks and single-library studies
+└── fixtures/                         # .lpd datasets and Pages2k/ only; the test
+                                      # notebooks are built by tests/notebook_fixtures.py
 ```
 
 ### Test reference tree

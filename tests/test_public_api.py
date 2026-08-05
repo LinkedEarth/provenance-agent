@@ -29,14 +29,13 @@ Design decisions:
       broken canonical path fail here rather than somewhere downstream.
 """
 
-import os
 import inspect
 
 import pytest
 
 from provenance_agent import cite_software
 
-SAMPLE = os.path.join(os.path.dirname(__file__), "..", "notebooks", "fixtures", "sample.ipynb")
+from notebook_fixtures import SAMPLE
 
 
 def _write_lipdgraph_notebook(path):
