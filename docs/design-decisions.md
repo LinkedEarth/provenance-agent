@@ -72,6 +72,38 @@ cell *builders* are public and separate from the *injectors*: a host that does
 have a kernel can use the builders and skip the injection entirely. See
 [paleopal-integration.md §3.2](paleopal-integration.md#32-there-is-a-kernel-which-changes-the-design).
 
+### What that looks like at the call site
+
+```python
+from provenance_agent import cite_data, cite_software
+
+cite_software("notebook.ipynb")                      # every imported library
+cite_software("notebook.ipynb", libraries="pyleoclim")
+cite_data("notebook.ipynb")                          # every detected dataset
+cite_data("notebook.ipynb", targets="Ocn-RedSea.Felis.2000")
+```
+
+Both functions modify the notebook in place unless given an `output_path`, and
+return what they injected a cell for rather than the citations themselves.
+`cite_software` returns the library names; `cite_data` returns `[variable,
+tool]` pairs. Dataset detection is static, but dataset *retrieval* runs in the
+notebook's own kernel, which is why the citations are the injected cell's
+output.
+
+The LangChain tools and the natural-language router live in their own modules,
+so importing the two functions above does not construct the model client:
+
+```python
+from provenance_agent.data import cite_data_tool
+from provenance_agent.software import cite_software_tool
+from provenance_agent.agent import run
+```
+
+Since the lazy-client change, importing the router does not construct a client
+either - see [§6](#6-nothing-constructs-an-llm-client-at-import). What the split
+buys now is that callers who only want the two direct functions never pull in
+the routing layer, LangChain, or the provider registry at all.
+
 ## 2. Two symmetric workflows that never merge
 
 Software and data are separate questions with separate answers, and they stay

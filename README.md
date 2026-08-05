@@ -166,7 +166,7 @@ Is an optional command to set the the notebook path to cite; by default it is th
 ```python
 %provenance cite everything
 ``` 
-Ask the agent in natural language what to cite. Both broad requests, like "cite the software" or "cite the data" or "cite everything," as well as specific targets such as "cite pandas and numpy."
+Ask the agent in natural language what to cite. Both broad requests, like "cite the software" or "cite the data" or "cite everything," as well as specific targets such as "cite pandas and numpy." This will append code cell(s)
 
 
 
@@ -185,32 +185,7 @@ per session:
 
 
 
-### From Python
 
-```python
-from provenance_agent import cite_data, cite_software
-
-cite_software("notebook.ipynb")                      # every imported library
-cite_software("notebook.ipynb", libraries="pyleoclim")
-cite_data("notebook.ipynb")                          # every detected dataset
-cite_data("notebook.ipynb", targets="Ocn-RedSea.Felis.2000")
-```
-
-Both functions modify the notebook in place unless given an `output_path`, and
-return what they injected a cell for rather than the citations themselves.
-`cite_software` returns the library names; `cite_data` returns `[variable,
-tool]` pairs. Dataset detection is static, but dataset *retrieval* runs in the
-notebook's own kernel, which is why the citations are the injected cell's
-output.
-
-The LangChain tools and the natural-language router live in their own modules,
-so importing the two functions above does not construct the model client:
-
-```python
-from provenance_agent.data import cite_data_tool
-from provenance_agent.software import cite_software_tool
-from provenance_agent.agent import run
-```
 
 ## Technical details
 
