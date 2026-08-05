@@ -1,8 +1,8 @@
 # Provenance Agent - Documentation (draft)
 
-> Draft for review. The intent is that most of this eventually replaces or
-> expands `README.md`; it is kept separate for now so the README stays short
-> while this is being edited.
+> Draft. The intent is that most of this eventually replaces or expands
+> `README.md`; it is kept separate for now so the README stays short while this
+> is being edited. Everything in it describes the tool as it currently behaves.
 
 ---
 
@@ -68,27 +68,46 @@ Three kinds, and the detector recognizes each by the calls that create it:
 
 ## 2. Installation
 
-Requires **Python 3.10+**. In this project, use the `lang` conda environment -
-it is the only one with `pylipd`, `pyleotups`, and `pyleoclim` installed.
+Requires **Python 3.10+**. The package is not on PyPI, so install it from a
+clone:
 
 ```bash
-/opt/anaconda3/envs/lang/bin/python -m pip install -e ".[dev]"
+git clone https://github.com/LinkedEarth/provenance-agent.git
+cd provenance-agent
+pip install -e ".[dev,google]"
 ```
 
-That one command installs the package, its runtime dependencies, and `pytest`.
-Nothing needs to go on `sys.path`.
+That one command installs the package, its runtime dependencies, `pytest`, and
+one LLM provider. Nothing needs to go on `sys.path`.
+
+**Swap `google` for the provider you actually want** - `openai`, `anthropic`,
+`ollama`, or `xai`. No provider is installed by default, so nobody carries an integration
+they will never load; see [Choosing an LLM
+provider](#choosing-an-llm-provider). If you only plan to use the direct Python
+functions, which need no model at all, `pip install -e ".[dev]"` is enough.
+
+### Which environment to install into
 
 **Install it into the same environment as the Jupyter kernel you will analyze
 notebooks from.** The cell the software workflow injects contains
-`from provenance_agent.citations import collect_library_entries`, so that
-kernel has to be able to import the package.
+`from provenance_agent.citations import collect_library_entries`, so that kernel
+has to be able to import the package. If your notebooks run in a conda
+environment, activate that environment first and install into it; if they run in
+a virtualenv, install into that.
 
-### Before installing into an existing conda environment
+The agent depends on `pylipd` and `pyleotups` because the retrieval cells it
+generates import them. It deliberately does **not** depend on the analysis
+libraries your notebook uses - `pyleoclim`, `xarray`, `eofs`, `cfr`, and the
+rest belong to the notebook's own environment. Installing the agent into the
+kernel you already use for that science is therefore the whole setup.
 
-pip can silently replace conda-managed scientific packages. Check first:
+### Before installing into an existing scientific environment
+
+pip can silently replace conda-managed scientific packages with PyPI builds.
+If you are installing into an environment you care about, check first:
 
 ```bash
-/opt/anaconda3/envs/lang/bin/python -m pip install --dry-run -e ".[dev]"
+pip install --dry-run -e ".[dev,google]"
 ```
 
 The output should end with `Would install provenance-agent-0.1.0` and nothing
@@ -97,12 +116,19 @@ else. If it proposes changing `numpy`, `pandas`, `pylipd`, `pyleotups`, or
 
 ### Credentials
 
-The natural-language layers (`%provenance` and `agent.run`) call Gemini and
-need a `GOOGLE_API_KEY`. The direct Python functions do not use the model at
-all and need no key.
+Only the natural-language layers (`%provenance` and `agent.run`) call a model.
+The direct Python functions, `cite_software()` and `cite_data()`, use no model
+at all and need no key of any kind. If you never want to configure an API key,
+[skip to the direct functions](#from-python-the-direct-functions) - they are the
+majority of the tool.
 
 Put the key in a `.env` file **at the root of the project you are working in**,
 or export it. An exported environment variable wins over the file.
+
+```bash
+# .env
+GOOGLE_API_KEY=...
+```
 
 > **The root location matters.** `provenance_agent.llm` looks in the working
 > directory first and falls back to a search from the package's own directory.
@@ -111,14 +137,107 @@ or export it. An exported environment variable wins over the file.
 > never runs there. A `.env` that only exists under `src/` is invisible to
 > notebooks. Keep one at the repository root.
 
+### Choosing an LLM provider
+
+The model is only used to classify one short request into a typed decision, so
+any competent chat model does the job, and you are not tied to Google. Two
+environment variables choose one:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `PROVENANCE_LLM_PROVIDER` | `google`, `openai`, `anthropic`, `ollama`, or `xai` | `google` |
+| `PROVENANCE_LLM_MODEL` | the model identifier to pass to that provider | the provider's default, below |
+
+| Provider | Install | Key variable | Default model |
+|---|---|---|---|
+| `google` | `pip install -e ".[google]"` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | `gemini-flash-latest` |
+| `openai` | `pip install -e ".[openai]"` | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| `anthropic` | `pip install -e ".[anthropic]"` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
+| `ollama` | `pip install -e ".[ollama]"` | none - runs locally | `llama3.1` |
+| `xai` | `pip install -e ".[xai]"` | `XAI_API_KEY` | `grok-4` |
+
+`grok` is accepted as an alias for `xai`, which is the name PaleoPAL uses.
+
+Google is only the *default selection*, not a default installation. So an
+OpenAI user writes:
+
+```bash
+pip install -e ".[dev,openai]"
+```
+
+```bash
+# .env
+PROVENANCE_LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+and optionally `PROVENANCE_LLM_MODEL=gpt-4o` to override the default model. No
+Google package is installed and no Google key is ever consulted.
+
+**Every provider is an extra, including the default one.** The integrations are
+imported lazily, so you install exactly the one you selected and nothing else.
+That matters because `langchain-google-genai` pulls `google-genai` and
+`google-auth`, which in turn pull `cryptography` and `aiohttp` - precisely the
+kind of transitive install the section above warns about for conda
+environments. The trade-off is that a core install has no provider at all, so
+the first `%load_ext provenance` after forgetting to pick one fails with an
+error naming the exact install command:
+
+```
+RuntimeError: LLM provider 'google' needs the langchain_google_genai package,
+which is not installed. Install it with: pip install "provenance-agent[google]"
+```
+
+The API key is checked before the package is imported, so someone with neither
+a key nor an integration is told about the key first. That ordering is
+deliberate: the key is the requirement they would hit again immediately after
+installing the package.
+
+### If you already use PaleoPAL
+
+This agent is standalone, but it is meant to sit comfortably alongside PaleoPAL
+and is expected to be integrated into it eventually. Its LLM configuration is
+therefore readable from a PaleoPAL setup without editing anything:
+
+- **Keys carry over unchanged.** `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GOOGLE_API_KEY`, and `XAI_API_KEY` are the same names PaleoPAL uses, so
+  whichever you already have works here.
+- **Vendor selection carries over.** If `PROVENANCE_LLM_PROVIDER` is unset, the
+  agent reads PaleoPAL's `DEFAULT_LLM_PROVIDER`, including its `grok` spelling
+  for xAI. Setting `PROVENANCE_LLM_PROVIDER` always overrides it, so you can run
+  PaleoPAL on one vendor and this agent on another.
+- **Model selection deliberately does not carry over.** PaleoPAL's
+  `OPENAI_MODEL`, `CLAUDE_MODEL`, `GOOGLE_MODEL`, `GROK_MODEL`, and
+  `OLLAMA_MODEL` are ignored. Its defaults are heavyweight reasoning models
+  chosen for multi-agent work over paleoclimate literature, whereas this agent
+  makes one short classification call that the cheap fast tier answers just as
+  well. Use `PROVENANCE_LLM_MODEL` if you want a specific model here.
+
+One thing name compatibility does not solve: PaleoPAL keeps its keys in
+`backend/.env`, while this agent searches upward from the working directory. A
+notebook outside `paleopal/backend/` will not find that file. Copy the keys into
+a `.env` at the root of your notebook project.
+
+To construct a client yourself rather than through the environment:
+
+```python
+from provenance_agent.llm import build_llm
+
+model = build_llm(provider="anthropic", model="claude-opus-5")
+```
+
+Adding a fifth provider means one entry in `PROVIDERS` in
+`src/provenance_agent/llm.py` - the integration package, the chat class, a
+default model, and the environment variables it accepts as a key.
+
 ### Verifying the install
 
 ```bash
-/opt/anaconda3/envs/lang/bin/python -m pytest tests/ -q
+pytest tests/ -q
 ```
 
-The suite is fully offline. No test calls Gemini, SPARQL, or a remote dataset
-service.
+The suite is fully offline. No test calls a model, SPARQL, or a remote dataset
+service, and it needs no API key.
 
 ---
 
@@ -215,7 +334,7 @@ for call in result["dispatch"]:
 ```
 
 `run` is imported from `provenance_agent.agent`, not from the package root.
-That is deliberate: `agent` builds the Gemini client at import time, so
+That is deliberate: `agent` builds the chat client at import time, so
 re-exporting it would make `import provenance_agent` require credentials for
 callers that only want the two direct functions.
 
@@ -322,7 +441,9 @@ not connect it to a recognized source.
 |---|---|---|
 | `The provenance_agent module is not an IPython extension.` | `%load_ext provenance_agent` | the extension is `%load_ext provenance`. `provenance_agent` is the *import* name, not the magic |
 | `UsageError: Line magic function '%provenance' not found.` | the extension never loaded, usually the row above | fix the `%load_ext` line and re-run it before any `%provenance` line |
-| `%load_ext provenance` raises a pydantic `ValidationError` about an API key | no `GOOGLE_API_KEY`. Loading the magic imports `agent`, which imports `llm`, which builds the Gemini client at import | put a `.env` at the project root, or export the key. Use the direct functions if you do not need routing |
+| `%load_ext provenance` raises `RuntimeError: No API key found for LLM provider ...` | no key for the selected provider. Loading the magic imports `agent`, which imports `llm`, which builds the client at import | set the variable the message names, in a `.env` at the project root or exported. Use the direct functions if you do not need routing |
+| `RuntimeError: LLM provider 'openai' needs the langchain_openai package` | `PROVENANCE_LLM_PROVIDER` selected a provider whose integration is not installed | run the install command in the message, e.g. `pip install -e ".[openai]"` |
+| `ValueError: Unknown LLM provider ...` | a typo in `PROVENANCE_LLM_PROVIDER` | the message lists the registered names; see [Choosing an LLM provider](#choosing-an-llm-provider) |
 | `UsageError: Could not auto-detect the current notebook path` | `ipynbname` cannot match the kernel, normal in VSCode | `%provenance_notebook path/to/notebook.ipynb` |
 | The result is missing a cell you just wrote | every workflow reads the `.ipynb` **from disk** | save the notebook and re-run |
 | `ModuleNotFoundError: provenance_agent` in an injected cell | the kernel's environment does not have the package | `pip install -e ".[dev]"` into *that* environment, then restart the kernel |
@@ -386,7 +507,8 @@ The demo notebooks under `notebooks/demos/` do this already.
 ```text
 provenance-agent/
 ├── pyproject.toml                  setuptools src-layout config; deps, the
-│                                   `dev` extra, and Citations/ as package data
+│                                   `dev` extra, one extra per optional LLM
+│                                   provider, and Citations/ as package data
 ├── src/
 │   ├── provenance.py               the top-level module `%load_ext provenance`
 │   │                               resolves. A forwarding shim over
@@ -446,9 +568,12 @@ provenance-agent/
 │       │                           Resolves the notebook path, calls
 │       │                           agent.run(), renders the envelope. No
 │       │                           citation or routing logic
-│       ├── llm.py                  the single shared Gemini client and the
-│       │                           helper that normalizes a response to text.
-│       │                           Owns credential discovery
+│       ├── llm.py                  the PROVIDERS registry, build_llm(), the
+│       │                           single shared chat client, and the helper
+│       │                           that normalizes a response to text. Owns
+│       │                           provider selection and credential discovery.
+│       │                           Integrations are imported lazily, so only
+│       │                           the selected provider must be installed
 │       └── Citations/              packaged citation data: library_citations.yml
 │                                   (the index) plus one .bib per library
 ├── notebooks/
@@ -484,6 +609,7 @@ provenance-agent/
 | Module | Covers |
 |---|---|
 | `test_notebook_io.py`, `test_citations.py` | parsing and citation lookup |
+| `test_llm.py` | response normalization and the provider registry: name resolution, both environment variables, and the missing-package / missing-key messages |
 | `test_software.py`, `test_data.py` | each workflow's cell building and injection |
 | `test_dataset_detection.py` | the facade, including the deprecated LLM helpers |
 | `test_deterministic_dataset_detection.py` | the analyzer, including the tracked corpus |
@@ -521,8 +647,8 @@ provenance-agent/
   with no entry produces a row whose `note` reads
   `"No citation found for imported library"` and whose citation fields are all
   null. It is reported rather than dropped, on purpose, so you can see what is
-  missing. Of the libraries this project expects to meet, **`pens` and
-  `climlab` have no entry**.
+  missing. Among the paleoclimate libraries the agent is otherwise built for,
+  **`pens` and `climlab` have no entry**.
 - **Three libraries have a paper but no software citation.** `eofs`, `scipy`,
   and `seaborn` have an inline paper entry and no `.bib` file, so asking for
   `citation_types=["software"]` gives them a "not found" row.
@@ -584,15 +710,39 @@ provenance-agent/
 
 ### The agent layer
 
-- **`%provenance` and `agent.run` need a Gemini API key.** So does
-  `%load_ext provenance` itself, because loading the magic imports the router,
-  which imports the client, which validates the key at construction. The direct
-  functions need nothing.
+- **`%provenance` and `agent.run` need an API key.** So does `%load_ext
+  provenance` itself, because loading the magic imports the router, which
+  imports the client, which validates the key at construction. Which key depends
+  on `PROVENANCE_LLM_PROVIDER`; the default is Google. The direct functions need
+  nothing.
+- **Only one model call is ever made, and only by the agent layer.** It
+  classifies the request. Nothing else in the tool - detection, citation lookup,
+  cell generation - consults a model, which is why the provider choice barely
+  matters and why a local Ollama model is a reasonable option.
+- **Provider support is a fixed registry.** `PROVIDERS` in `llm.py` covers
+  Google, OpenAI, Anthropic, Ollama, and xAI - the same set PaleoPAL supports.
+  Anything else (Bedrock, Azure OpenAI, Vertex, Mistral) needs a registry entry,
+  which is a four-line code change but still a code change. There is no generic
+  `provider:model` string parsing.
+- **PaleoPAL compatibility is a convenience, not a contract.** Reading
+  `DEFAULT_LLM_PROVIDER` is a courtesy to users who already configured PaleoPAL.
+  Nothing verifies that PaleoPAL still uses that name, and if it renames the
+  variable this agent silently falls back to its own default rather than
+  failing. Set `PROVENANCE_LLM_PROVIDER` explicitly if you need certainty.
+- **Alternative credential schemes are not recognized.** The key check looks for
+  the environment variables in the registry, so Google application-default
+  credentials, an AWS profile, or an Azure deployment configuration will fail
+  the check even where the underlying client could have authenticated. Call
+  `build_llm(...)` directly if you need that.
 - **Routing is a model call, so it is not deterministic.** The classifier runs
   at `temperature=0`, but an unusual phrasing can still route differently or
-  come back as a warning. The direct functions are the deterministic path.
-- Notebook auto-detection fails in VSCode, which is this project's primary
-  environment. `%provenance_notebook` is the normal way to work, not a fallback.
+  come back as a warning. Weaker models route worse; the failure mode is a
+  warning rather than a wrong citation, because an unclear decision does not
+  mutate the notebook. The direct functions are the deterministic path.
+- **Notebook auto-detection fails in VSCode.** It works under JupyterLab and
+  the classic notebook server, where `ipynbname` can match the kernel against
+  the server's session list. In VSCode `%provenance_notebook` is the normal way
+  to work, not a fallback.
 
 ### Scope and packaging
 
@@ -601,6 +751,13 @@ provenance-agent/
   `cfr`, and similar belong to the analyzed notebook's own environment. Only
   `pylipd` and `pyleotups` are package dependencies, because the generated
   retrieval cells import them.
+- **No LLM integration is a core dependency.** All five providers are extras,
+  including the default one, so a core install has no model client and the
+  agent layer raises until you pick a provider. This is deliberate: the
+  alternative was shipping `langchain-google-genai` to every user regardless of
+  which provider they use. The `langchain` umbrella package is also not a
+  dependency, which is why provider selection is a small registry here rather
+  than a call to langchain's `init_chat_model`.
 - **No SPARQL-direct pathway.** LiPDGraph always converts to a LiPD object
   first. A hardcoded bibliography query exists only as a fallback if that
   conversion ever proves too slow.
@@ -611,16 +768,14 @@ provenance-agent/
 
 ### Ground truth
 
-Two files under `benchmark/ground_truth/` currently disagree with their
-notebooks and were left untouched during the package migration, which
-explicitly forbade changing expected entries:
+`benchmark/ground_truth/` holds the expected software and dataset entries for
+each corpus notebook, as YAML. It is data only; the scoring runner that once
+read it was removed, so nothing checks these files and neither of the two
+mismatches below breaks a test. If you are using them as a reference for what
+the agent should find, know that they are currently wrong:
 
 - `dataset_pipeline.yml` expects `bibliography`, `notebook_parser`, and `sys`.
-  Those were only ever imported because the notebook had a `sys.path.insert`
-  setup cell, which the migration removed.
+  Those were only ever imported because the notebook carried a `sys.path.insert`
+  setup cell, which no longer exists.
 - `paleoPCAlite.yml` expects `eofs`, `fsspec`, `glob`, `nc_time_axis`, `s3fs`,
-  and `xarray`, none of which that notebook imports. This drift predates the
-  migration.
-
-Nothing scores these files - the benchmark runner was removed - so neither
-mismatch breaks a test. They are documentation that is currently wrong.
+  and `xarray`, none of which that notebook imports.
