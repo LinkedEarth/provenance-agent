@@ -4,6 +4,14 @@
 > `README.md`; it is kept separate for now so the README stays short while this
 > is being edited. Everything in it describes the tool as it currently behaves.
 
+This is the manual: what the agent does and how to use it. Two companion
+documents cover the rest:
+
+- [design-decisions.md](design-decisions.md) - why it is built this way,
+  project-wide and per module.
+- [paleopal-integration.md](paleopal-integration.md) - notes on folding it into
+  PaleoPAL.
+
 ---
 
 ## Contents
