@@ -204,7 +204,7 @@ You may cite just the datasets.
 You may specify one or more imported software libraries.
 
 ```python
-%provenance cite TR04EVLI	
+%provenance cite TR04EVLI
 ```
 You may cite a specific dataset name loaded through PyLiPD or LiPDGraph.
 
