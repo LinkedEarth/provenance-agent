@@ -1,11 +1,11 @@
 """
 Unit tests for agent.py.
 
-The classifier normally uses Gemini, so these tests supply a fake LangChain
-Runnable and exercise the offline LCEL stages: typed decisions, warning/no-op
-resolution, sequential software/data dispatch, static cell verification, and
-the public result envelope. The tool registry remains covered for direct/API
-callers even though the model is no longer bound to those tools.
+The classifier normally calls the configured chat model, so these tests supply a
+fake LangChain Runnable and exercise the offline LCEL stages: typed decisions,
+warning/no-op resolution, sequential software/data dispatch, static cell
+verification, and the public result envelope. The tool registry is covered for
+direct and API callers, even though the model is not bound to those tools.
 """
 
 import json

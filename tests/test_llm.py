@@ -61,6 +61,19 @@ def _recording_spec(**overrides) -> ProviderSpec:
     return ProviderSpec(**fields)
 
 
+def _patch_xai_client(monkeypatch):
+    """Replaces the xAI integration import with an offline recording client."""
+    class RecordingXAI:
+        def __init__(self, **kwargs):
+            self.model = kwargs["model"]
+
+    monkeypatch.setattr(
+        llm_module.importlib,
+        "import_module",
+        lambda module_name: SimpleNamespace(ChatXAI=RecordingXAI),
+    )
+
+
 def test_message_text_plain_string():
     assert message_text(SimpleNamespace(content="hello")) == "hello"
 
@@ -139,6 +152,10 @@ def test_the_grok_alias_works_from_our_variable_too(clean_env):
     assert resolve_provider() == "xai"
 
 
+def test_xai_registry_default_is_grok_4_3():
+    assert PROVIDERS["xai"].default_model == "grok-4.3"
+
+
 def test_every_alias_points_at_a_registered_provider():
     for alias, canonical in PROVIDER_ALIASES.items():
         assert canonical in PROVIDERS, alias
@@ -192,6 +209,42 @@ def test_build_llm_passes_the_default_model_and_temperature(clean_env):
 
     assert client.model == "fake-default"
     assert client.temperature == 0
+
+
+def test_build_llm_omits_temperature_for_anthropic(clean_env):
+    clean_env.setenv("ANTHROPIC_API_KEY", "x")
+
+    class NoTemperatureClient:
+        def __init__(self, **kwargs):
+            assert "temperature" not in kwargs
+            self.model = kwargs["model"]
+
+    fake_module = SimpleNamespace(ChatAnthropic=NoTemperatureClient)
+    clean_env.setattr(
+        llm_module.importlib,
+        "import_module",
+        lambda module_name: fake_module,
+    )
+
+    client = build_llm("anthropic")
+
+    assert client.model == PROVIDERS["anthropic"].default_model
+
+
+def test_xai_legacy_model_from_environment_is_rerouted(clean_env):
+    clean_env.setenv("XAI_API_KEY", "x")
+    clean_env.setenv("PROVENANCE_LLM_PROVIDER", "xai")
+    clean_env.setenv("PROVENANCE_LLM_MODEL", "grok-4")
+    _patch_xai_client(clean_env)
+
+    assert build_llm().model == "grok-4.3"
+
+
+def test_explicit_legacy_xai_model_is_rerouted(clean_env):
+    clean_env.setenv("XAI_API_KEY", "x")
+    _patch_xai_client(clean_env)
+
+    assert build_llm("xai", model="grok-4").model == "grok-4.3"
 
 
 def test_build_llm_honors_the_model_environment_variable(clean_env):
@@ -321,6 +374,15 @@ def test_every_registered_provider_is_fully_specified():
         assert spec.install.startswith("pip install"), name
         assert isinstance(spec.key_variables, tuple), name
         assert all(v == v.upper() for v in spec.key_variables), name
+        assert isinstance(spec.supports_temperature, bool), name
+
+
+def test_temperature_support_is_explicit_for_every_registered_provider():
+    assert PROVIDERS["google"].supports_temperature is True
+    assert PROVIDERS["openai"].supports_temperature is True
+    assert PROVIDERS["anthropic"].supports_temperature is False
+    assert PROVIDERS["ollama"].supports_temperature is True
+    assert PROVIDERS["xai"].supports_temperature is True
 
 
 def test_an_explicit_provider_ignores_a_configured_one(clean_env):

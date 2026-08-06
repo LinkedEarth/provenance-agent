@@ -3,10 +3,10 @@ Inspectable LCEL routing pipeline for software and dataset provenance.
 
 Purpose:
     Accept one natural-language citation request, classify its typed targets,
-    dispatch the existing notebook workflows in place, and return a structured
-    verification envelope describing what was injected. The pipeline replaces
-    hidden one-shot model tool-calling with named Runnable stages composed by
-    the LCEL ``|`` operator.
+    dispatch the notebook workflows in place, and return a structured
+    verification envelope describing what was injected. The pipeline is built
+    from named Runnable stages composed with the LCEL ``|`` operator, so each
+    step is separately inspectable instead of hidden inside model tool-calling.
 
 Implementation:
     ``prepare_context`` reads imported library names from the notebook;
@@ -27,13 +27,13 @@ Design decisions:
       loading, but a specific PyleoTUPS study-name request warns and does not
       dispatch or mutate the notebook because its available names are only
       known inside the live provider object.
-    - The existing StructuredTool wrappers remain public for direct callers,
-      but they are not bound to the classification model.
-    - ``fmt`` is still classified and carried through dispatch, but it has no
-      downstream effect: APA rendering was removed, so ``cite_data`` accepts any
-      value and ignores it. The prompt still mentions APA and the field is a
-      plain ``str`` rather than a ``Literal``, so an unexpected value cannot
-      fail classification. The surface is held open for a future non-LLM APA
+    - The StructuredTool wrappers are public for direct callers, but they are
+      not bound to the classification model.
+    - ``fmt`` is classified and carried through dispatch, but it has no
+      downstream effect: nothing renders citation text, so ``cite_data`` accepts
+      any value and ignores it. The prompt mentions APA and the field is a plain
+      ``str`` rather than a ``Literal``, so an unexpected value cannot fail
+      classification. The surface is held open for a future non-LLM APA
       implementation.
     - ``build_chain(model=...)`` supports fake Runnable models in offline tests;
       the default pipeline uses the client configured in ``llm.py``.
@@ -51,7 +51,7 @@ Design decisions:
       ``llm.py``'s provider registry a standalone-mode default rather than a
       competing abstraction that has to be removed on integration. Omitting the
       argument reads the module-level ``chain`` at call time, so the default
-      path and monkeypatching both behave exactly as before. Injecting a model
+      path works and substituting ``_CHAIN`` still redirects it. Injecting a model
       also avoids constructing the configured client entirely: importing this
       module imports ``llm`` but never reads its lazy ``llm`` attribute, so a
       caller that always passes ``model=`` never builds one and needs neither
@@ -149,7 +149,12 @@ _TOOLS_BY_NAME = {tool.name: tool for tool in _TOOLS}
 
 def build_messages(request: str, notebook_path: str) -> list:
     """
-    Builds the legacy two-message representation for callers that use it.
+    Renders the classification prompt as a plain system/human message pair.
+
+    The pipeline itself classifies through ``_CLASSIFIER_PROMPT``, which also
+    supplies the imported-library list and the parser's format instructions.
+    This helper is the message-level view of the same system prompt, for a
+    caller that wants to inspect or send it directly.
 
     Args:
         request: natural-language citation request

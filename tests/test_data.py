@@ -3,9 +3,10 @@ test_data.py
 
 Purpose:
     Unit tests for the pure logic in data.py: generating the per-tool
-    retrieval-cell source (build_retrieval_cell), filtering detected pairs
-    (filter_datasets), and injecting retrieval cells into a notebook
-    (inject_retrieval_cells).
+    retrieval-cell source (build_retrieval_cell), lifting the LiPDGraph endpoint
+    (extract_lipdgraph_endpoint), narrowing detected pairs (filter_datasets,
+    split_targets, pyleotups_target_warning), and injecting the dataset cell
+    into a notebook (inject_retrieval_cells, generate_data_workflow).
 
 Implementation:
     build_retrieval_cell and filter_datasets are pure string/list functions.
@@ -23,9 +24,9 @@ Design Decisions:
     - LiPDGraph retrieval must convert the terminal DataFrame to a LiPD object,
       so its cell references the DataFrame's dataSetName column and the LiPDVerse
       endpoint - asserted explicitly.
-    - Targeted PyLiPD and LiPDGraph cells load only the requested names; the
-      untargeted paths remain unchanged. PyleoTUPS keeps its existing
-      post-retrieval metadata filter.
+    - Targeted PyLiPD and LiPDGraph cells load only the requested names, while
+      the untargeted paths reuse the notebook's own loaded object. A targeted
+      PyleoTUPS cell filters its metadata after retrieval instead.
     - Unsupported tools raise ValueError rather than silently emitting nothing.
 """
 

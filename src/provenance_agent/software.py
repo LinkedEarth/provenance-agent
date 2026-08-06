@@ -33,10 +33,9 @@ Implementation:
 
 Design decisions:
     - The public function, the workflow, and the cell builder live in one
-      module because they are one operation at three levels of detail. They used
-      to be split across an orchestrator module, which meant a reader chasing
-      "what does cite_software actually do" crossed a file boundary to reach a
-      one-line delegation.
+      module because they are one operation at three levels of detail. A reader
+      chasing "what does cite_software actually do" never crosses a file
+      boundary to reach a one-line delegation.
     - cite_software delegates to generate_software_workflow rather than
       replacing it. Both names are public: cite_software is the API callers and
       the agent use, generate_software_workflow is the step name notebook
@@ -59,7 +58,7 @@ Design decisions:
       workflow's "nothing detected" path.
     - Standard-library imports (sys, os, json, io, ast, pathlib, ...) are dropped
       from the import list before the cell is built. They ship with the
-      interpreter and nobody cites them, and leaving them in produced one
+      interpreter and nobody cites them, so keeping them would add one
       "No citation found" row per stdlib module. collect_library_entries drops
       them too, so a direct caller passing a stdlib name in gets the same
       answer.

@@ -2,11 +2,11 @@
 Structural checks on the notebook tree itself.
 
 Purpose:
-    The notebooks were moved and rewritten wholesale, and the two ways that
-    goes wrong are silent. A notebook can be left structurally invalid by an
-    edit that a JSON dump still accepts, and a relative fixture path can be
-    left pointing at where a file used to be. Neither shows up in any other
-    test, because nothing else in the suite opens most of these notebooks.
+    The two ways an edit to the notebook tree goes wrong are both silent. A
+    notebook can be left structurally invalid by an edit that a JSON dump still
+    accepts, and a relative data path can be left pointing at a file that is not
+    beside its notebook. Neither shows up in any other test, because nothing
+    else in the suite opens most of these notebooks.
 
 Implementation:
     `test_every_notebook_is_valid_and_round_trips` runs nbformat.validate over
@@ -16,7 +16,7 @@ Implementation:
     and resolves each against its own notebook's directory.
 
 Design decisions:
-    - No cell is ever executed. Running these notebooks means Gemini calls,
+    - No cell is ever executed. Running these notebooks means model calls,
       SPARQL queries against LiPDGraph, and remote dataset downloads. Every
       check here is static.
     - Round-trip equality is asserted against a re-serialization rather than
@@ -29,8 +29,8 @@ Design decisions:
     - Path literals containing "://" are skipped as remote URLs.
     - The instruction bundles load their data by bare sibling name, e.g.
       `lipd.load('Vostok.Bazin.2013.lpd')`. That is exactly what this test
-      resolves relative to the notebook, so it is what proves each bundle
-      moved intact rather than being flattened.
+      resolves relative to the notebook, so it is what proves each bundle is
+      still intact rather than flattened away from its `.lpd` sibling.
 """
 
 import ast
@@ -56,18 +56,17 @@ def test_the_notebook_tree_is_not_empty():
     Guards the guard: an empty glob would make every check below vacuous.
 
     The count is a floor rather than the exact size, so adding a notebook does
-    not fail the suite. It dropped when the four workflow demos were merged into
-    one and the scratch notebooks under exploration/ were removed; fixtures/ no
-    longer holds notebooks either, because the test inputs are now built in code
-    by tests/notebook_fixtures.py.
+    not fail the suite. It counts only the three published directories: the
+    suite's own inputs are built in code by tests/notebook_fixtures.py and never
+    live under notebooks/.
     """
     assert len(NOTEBOOKS) > 10
     directories = {path.relative_to(REPO_ROOT / "notebooks").parts[0] for path in NOTEBOOKS}
     assert directories == {"demos", "examples", "instructions"}
 
 
-def test_no_notebook_is_left_outside_the_new_layout():
-    """The pre-move locations, including notebooks/testing/, are gone."""
+def test_no_notebook_is_left_outside_the_layout():
+    """Every notebook sits in one of the three directories, none at the root."""
     assert not (REPO_ROOT / "notebooks" / "testing").exists()
     assert [path for path in NOTEBOOKS if path.parent == REPO_ROOT / "notebooks"] == []
 

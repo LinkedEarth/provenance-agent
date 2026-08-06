@@ -27,8 +27,9 @@ Implementation:
       confirmation line the magic prints.
     - cite(request): resolve path -> agent.run() -> formatted text.
     - _format_result(call) / _format_results(result): render the structured
-      envelope returned by agent.run(). The legacy single-call formatter is
-      retained as a small compatibility helper for direct callers and tests.
+      envelope returned by agent.run(). _format_result renders one dispatched
+      call; _format_results renders the whole envelope, and also accepts a bare
+      list of calls for callers that hold one.
     - ProvenanceMagics / load_ipython_extension(ipython): registration, so
       %load_ext provenance works.
 

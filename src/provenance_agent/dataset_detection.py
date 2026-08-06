@@ -17,9 +17,9 @@ Implementation:
       detection. See below.
 
 Deprecated LLM fallback:
-    Detection used to send the notebook's code to Gemini and parse a JSON list
-    of pairs out of the reply. That path is deprecated but deliberately intact,
-    so the project can switch back without reconstructing it. It consists of
+    The deprecated path sends the notebook's code to the configured model and
+    parses a JSON list of pairs out of the reply. It is deliberately intact, so
+    the project can switch back to it without reconstructing it. It consists of
     DETECTION_PROMPT, build_detection_prompt(), _strip_code_fences(),
     parse_detection_response(), and the commented-out call inside
     detect_datasets(). Restoring it means uncommenting that call; nothing else
@@ -27,9 +27,9 @@ Deprecated LLM fallback:
     are kept so the fallback stays known-good.
 
 Design decisions:
-    - The public active detector accepts a notebook path so the static analyzer
-      can preserve notebook cell boundaries and ignore generated cells. The
-      deprecated LLM path took concatenated code instead, which is why the
+    - The active detector accepts a notebook path so the static analyzer can
+      preserve notebook cell boundaries and ignore generated cells. The
+      deprecated LLM path takes concatenated code instead, which is why the
       commented-out call reads differently from the active one.
     - detect_datasets() preserves its list return contract while emitting
       UserWarning messages for unresolved analysis source lineage. Callers that

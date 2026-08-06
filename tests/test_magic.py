@@ -1,10 +1,10 @@
 """
 Unit tests for provenance_agent.magic (the %provenance IPython magic).
 
-The magic is a presentation layer over agent.run(), which needs Gemini, so
+The magic is a presentation layer over agent.run(), which calls a model, so
 agent.run and the ipynbname auto-detect are monkeypatched here - no test makes
 a network call. What's covered: notebook-path precedence and its error
-message, legacy call formatting, the structured result envelope, and the
+message, single-call formatting, the structured result envelope, and the
 empty-request / unroutable-request paths.
 
 These target the implementation module directly. The top-level `provenance`

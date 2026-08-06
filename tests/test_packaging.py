@@ -20,10 +20,10 @@ Implementation:
     --no-build-isolation` and reads its manifest with zipfile.
 
 Design decisions:
-    - Subprocesses, not monkeypatched sys.path. Import side effects (the eager
-      Gemini client, the dotenv load) happen once per process, so the only
-      honest way to assert on "what a fresh interpreter sees" is a fresh
-      interpreter.
+    - Subprocesses, not monkeypatched sys.path. Import side effects (the dotenv
+      load, the module caches behind the lazy client) happen once per process,
+      so the only honest way to assert on "what a fresh interpreter sees" is a
+      fresh interpreter.
     - `_run_isolated` writes the snippet to a *file* and runs that file, rather
       than passing it with `python -c`. This is not cosmetic. python-dotenv
       decides between its two search strategies by asking whether `__main__`
@@ -34,20 +34,20 @@ Design decisions:
     - The script is written outside the working directory, so `sys.path[0]` is
       the script's directory and the tests can place files in cwd without
       making them importable.
-    - The credential tests use fake keys written into tmp_path. The client is
-      constructed at import time and validates that *a* key exists, not that it
-      works, so a fake value exercises the whole lookup without a model call.
-      Only the resolved path is ever asserted on, never a real key's value.
+    - The credential tests use fake keys written into tmp_path. They assert on
+      what the dotenv lookup resolved, not on a model call, so a fake value
+      exercises the whole discovery path. Only the resolved path and the value
+      the test itself wrote are ever asserted on, never a real key's value.
     - The notebook-shaped case (a .env in an ancestor of the working directory)
       is tested against a synthetic directory tree rather than this checkout,
       so it holds on a clean clone. The one test that does depend on the real
       src/.env skips when it is absent: that file is developer-local and
       untracked by design, so a failure there would be reporting the absence of
       a secret, not a defect.
-    - The magic-shim import test supplies a fake key. Importing the shim pulls
-      in the agent and its eagerly constructed client by design, and this test
-      is about whether the module is installed and reachable, not about where
-      credentials come from - the credential tests below cover that.
+    - The magic-shim import test supplies a fake key even though the shim needs
+      none, because it is about whether the module is installed and reachable,
+      not about credentials. That importing it truly needs no key is asserted
+      separately, by test_loading_the_magic_needs_no_credentials.
     - The artifact test asserts on the absence of any dotenv file anywhere in
       the wheel, not just at the two paths that exist today, so a future
       packaging change that sweeps one in still fails.
@@ -66,7 +66,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Enough to satisfy the eager client's "a key is set" check. It is never sent
+# Enough to satisfy build_llm()'s "a key is set" check. It is never sent
 # anywhere: no test in this file makes a model call.
 FAKE_KEY = "not-a-real-key"
 
@@ -175,9 +175,9 @@ def test_magic_shim_is_importable_from_outside_the_repository(tmp_path):
 
 # --- import costs no credentials ----------------------------------------------
 #
-# A fresh clone has no .env, because .env is untracked. Before the client was
-# made lazy these properties all failed, which meant the documented
-# `pytest tests/ -q` verification step errored out for every new contributor.
+# A fresh clone has no .env, because .env is untracked. These tests are what
+# keep the documented `pytest tests/ -q` verification step working for a new
+# contributor who has configured no credentials at all.
 #
 # Dropping the key variables is not enough to reproduce that here: _run_isolated
 # deliberately runs the snippet as a file, which is the shape python-dotenv needs

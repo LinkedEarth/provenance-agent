@@ -3,10 +3,9 @@ Notebook inputs for the test suite, built in code rather than checked in.
 
 Purpose:
     Several test modules need a small notebook to parse, inject into, and route
-    against. These used to be two files under ``notebooks/fixtures/``:
-    ``sample.ipynb`` (a normal notebook) and ``test_magic_commands.ipynb``
-    (cells carrying ``%``, ``!``, and ``%%`` directives). Both were deleted, so
-    this module reconstructs them.
+    against. This module builds both of them: ``SAMPLE`` (a normal notebook) and
+    ``MAGIC_NOTEBOOK`` (cells carrying ``%``, ``!``, and ``%%`` directives). No
+    notebook is checked in for the suite to depend on.
 
 Implementation:
     ``_write`` builds an nbformat notebook from a list of ``(cell_type, source)``
@@ -18,11 +17,10 @@ Implementation:
         from notebook_fixtures import SAMPLE
 
 Design decisions:
-    - Paths, not pytest fixtures. The consuming modules already treat these as
+    - Paths, not pytest fixtures. The consuming modules treat these as
       module-level constants, several using them inside parametrize data where a
-      fixture cannot reach. Keeping the contract a path is what made this a
-      drop-in replacement instead of a rewrite of every test signature.
-    - The content is reproduced deliberately, not approximated. ``SAMPLE``
+      fixture cannot reach.
+    - The content is chosen deliberately, not approximated. ``SAMPLE``
       imports numpy, pandas, pyleoclim, and matplotlib because the tests assert
       on that exact library set, and ``MAGIC_NOTEBOOK`` keeps one cell per
       directive form because that is the distinction it exists to pin.
@@ -31,8 +29,8 @@ Design decisions:
       copy. ``test_software`` explicitly asserts the source notebook is
       unmodified, which would catch a violation of that assumption.
     - One temporary directory, removed by ``atexit``. No test artifact is left
-      in the repository, which is what makes the checked-in fixtures
-      unnecessary in the first place.
+      in the repository, which is what lets the suite carry its own inputs
+      instead of relying on checked-in notebooks.
 """
 
 import atexit

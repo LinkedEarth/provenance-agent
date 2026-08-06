@@ -6,7 +6,7 @@ Purpose:
     analysis operation, or whose live terminal source-backed table leaves are
     the results for that source when no analysis resolves its lineage. The
     fallback is therefore per active source, not per notebook. The public entry
-    point accepts only a notebook path and returns the repository's existing
+    point accepts only a notebook path and returns the repository's
     list-of-pairs contract, such as [["filtered_df2", "LiPDGraph"]].
 
 Implementation:
@@ -1815,7 +1815,7 @@ def _detect_datasets_from_code(code: str) -> list[list[str]]:
     Detects analysis-used dataset sources from one Python source string.
 
     This private helper is useful for small internal checks. The public
-    notebook API remains detect_datasets_in_notebook(), which accepts only a
+    notebook API is detect_datasets_in_notebook(), which accepts only a
     notebook path.
 
     Args:

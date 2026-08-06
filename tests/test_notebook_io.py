@@ -2,16 +2,17 @@
 test_notebook_io.py
 
 Purpose:
-    Unit and integration tests for notebook_io.py covering all three public
-    functions: strip_ipython_directives, extract_libraries, and parse_notebook.
+    Unit and integration tests for notebook_io.py's scanning surface:
+    strip_ipython_directives, extract_libraries, parse_notebook,
+    read_notebook_code, and is_generated_cell.
 
 Implementation:
     Unit tests for strip_ipython_directives and extract_libraries operate on raw
     strings with no file I/O. Integration tests for parse_notebook use the two
     notebooks built by tests/notebook_fixtures.py: SAMPLE (a normal notebook)
-    and MAGIC_NOTEBOOK (cells with %, !, and %% directives). Those used to be
-    checked in under notebooks/fixtures/; they are now written to a temporary
-    directory at import, so the suite carries its own inputs.
+    and MAGIC_NOTEBOOK (cells with %, !, and %% directives). Those are written
+    to a temporary directory at import, so the suite carries its own inputs
+    rather than depending on a checked-in notebook.
 
 Design Decisions:
     - Unit tests are file-independent so they run fast and in isolation.

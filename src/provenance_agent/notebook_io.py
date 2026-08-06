@@ -30,9 +30,10 @@ Design decisions:
       own (the software cell imports provenance_agent.citations, a LiPDGraph
       retrieval cell imports pylipd), which are the tool's machinery rather than
       the notebook's dependencies - and since pylipd has a citation on file,
-      scanning them made a second run cite a library the notebook never used.
-      New cells carry PROVENANCE_CELL_MARKER; the legacy signatures are matched
-      too so notebooks written by earlier versions need no re-run.
+      scanning them would make a second run cite a library the notebook never
+      used. Injected cells carry PROVENANCE_CELL_MARKER; the signatures earlier
+      versions used are matched too, so a notebook written by one of those needs
+      no re-run.
     - Detection of *datasets* is NOT done here. It is delegated to the
       deterministic detector exposed by dataset_detection.py. This module is
       otherwise purely the software (import) side.
