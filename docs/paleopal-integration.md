@@ -1,221 +1,261 @@
-# Integrating `provenance-agent` with PaleoPAL
+# Integrating `provenance-agent` into PaleoPAL
 
-This guide describes the current interfaces and the work required to embed
-`provenance-agent` in a PaleoPAL agent, extension, or notebook service.
+This document is connecting the provenance workflows to a
+PaleoPAL request path. It assumes that installation, standalone usage, and the
+general behavior of this package are already understood from the README, so please read that if not done so already. The
+integration problem is narrower: register provenance as one of PaleoPAL's
+agents, translate its requests into this package's interfaces, and carry
+generated-cell results back to the user.
 
-## Integration boundary
+> **Snapshot notice.** Everything below about PaleoPAL describes the
+> `LinkedEarth/PaleoPAL` backend as it stood on 2026-08-06 (commit `0ddcf29`).
+> That is a sibling repository on its own release schedule, so treat the file
+> paths and class names as a starting point to verify rather than as a stable
+> contract. Claims about `provenance-agent` itself are current.
 
-`provenance-agent` is a standalone package. It must work without importing
-PaleoPAL, and PaleoPAL may depend on it without becoming a dependency of the
-package.
+## Recommended integration
 
-The package owns:
+PaleoPAL is a collection of agents, and provenance should become one of them.
+Today the backend registers three: `SparqlGenerationAgent`,
+`CodeGenerationAgent`, and `WorkflowGenerationAgent`. A provenance agent joins
+them as a fourth, and calls this package for the provenance-specific work:
+static import and dataset detection, curated software citation lookup, and
+provider-specific dataset citation retrieval.
 
-- detecting imported software and dataset references;
-- looking up software citations and retrieving dataset metadata;
-- generating the notebook cells that display those citations;
-- optional natural-language routing through an LLM.
+The reason for this arrangement is consistency. Dataset lineage rules and
+provider-specific retrieval code should have one implementation; duplicating
+them in another PaleoPAL agent would eventually produce different target
+selection or different citation metadata. The model can classify a request,
+but it should not be the authority for whether a variable is a dataset. That
+decision is made by the deterministic detector, and the actual data citation
+still runs against the objects in the execution session.
 
-PaleoPAL should own the conversation, user interface, notebook session, and
-kernel execution. Dataset retrieval remains in `provenance-agent`; the
-integration should not delegate it to a separate PaleoPAL agent.
+### The agent contract
 
-## Public interfaces
+An agent is a class, not a function call. The contract lives in
+`backend/agents/base_agent.py`:
 
-| Interface | What it does | Important behavior |
-| --- | --- | --- |
-| `cite_software(notebook_path, ...)` | Finds imported libraries and adds a software-citation cell. | Detection is static. The function returns the library names used to build the cell, not the citation DataFrame. |
-| `cite_data(notebook_path, ...)` | Detects datasets and adds a dataset-retrieval cell. | Detection is static, but retrieval happens only when the generated cell runs in a kernel. The function returns `[variable, tool]` pairs, not the retrieved citations. |
-| `run(request, notebook_path, model=None)` | Classifies a natural-language request and dispatches the appropriate workflow. | The notebook is modified in place. It returns a structured result and performs static verification; it does not execute the new cells. |
-| `build_metadata_cell(...)` | Returns the source for a software-citation cell. | Use this when the host already controls cell execution. |
-| `build_dataset_cell(...)` | Returns the source for one dataset-citation cell. | Use this with a live kernel. The cell displays the metadata frames after retrieval. |
+- Subclass `BaseAgent` and pass `agent_type`, `name`, and `description` to
+  `super().__init__`.
+- Register one or more `AgentCapability` objects, each carrying a JSON
+  `input_schema` and `output_schema`.
+- Implement `async def handle_request(self, request: AgentRequest) ->
+  AgentResponse`.
+- Register the instance in `initialize_agents()` in
+  `backend/routers/agents.py`, beside the three existing agents.
 
-The direct functions are defined in `provenance_agent.software` and
-`provenance_agent.data`. The router is in `provenance_agent.agent`:
+The three current agents subclass `BaseLangGraphAgent` instead, which adds a
+LangGraph state machine plus the conversation, message, and job services, and
+requires implementing `_build_graph()` and `_create_agent_config()`. That
+machinery exists to support multi-turn clarification. A provenance request does
+not need it: this package already owns its own LCEL classification chain, so
+subclassing `BaseAgent` directly is the smaller and more honest fit. Reach for
+`BaseLangGraphAgent` only if provenance requests turn out to need PaleoPAL's
+clarification dialogue.
+
+Two capabilities cover the workflows cleanly, for example `cite_software` and
+`cite_data`, or a single `cite_provenance` capability that accepts a kind. The
+registry routes on `agent_type` and `capability` only, so whichever split you
+choose becomes the public surface other parts of PaleoPAL call.
+
+`handle_request` is `async`, while every entry point in this package is
+synchronous. Detection and cell generation are CPU-bound and fast, so calling
+them directly is acceptable; if a notebook is large enough for that to block
+the event loop, wrap the call in `asyncio.to_thread`.
+
+## Choose the integration surface
+
+### Live execution: build the cells, let PaleoPAL run them
+
+This is the best fit for an interactive PaleoPAL session. The agent can build
+the source, submit it to the execution service, and return the output
+immediately, without first rewriting an `.ipynb` file.
+
+The basic sequence is:
+
+```python
+from provenance_agent.data import build_dataset_cell
+from provenance_agent.dataset_detection import detect_datasets
+from provenance_agent.notebook_io import parse_notebook
+from provenance_agent.software import build_metadata_cell
+
+libraries = parse_notebook(notebook_path)
+pairs = detect_datasets(notebook_path)
+
+if request_software:
+    software_source = build_metadata_cell(libraries)
+    # Submit software_source through PaleoPAL's execution client.
+
+if request_data and pairs:
+    data_source = build_dataset_cell(pairs)
+    # Submit data_source through the same execution client.
+```
+
+The builders return Python source; they do not execute it. PaleoPAL executes
+code through `ExecutionClient.execute_code(code, conversation_id)` in
+`backend/services/execution_client.py`, which forwards to a separate isolated
+execution service (`http://localhost:8001` by default) that keeps state per
+conversation. There is no local Jupyter kernel client to hand a cell to.
+
+That matters for the data workflow, because untargeted retrieval calls methods
+on the live objects the detected variables name. **The unit of "the same
+kernel" is the `conversation_id`, not the notebook.** A data cell must be
+submitted under the same `conversation_id` that already ran the notebook's
+data-loading and filtering cells, or the objects will not exist. The service
+exposes `get_conversation_variables(conversation_id)` if the agent needs to
+confirm what that session currently holds.
+
+For a selected dataset, pass the dataset names to
+`build_dataset_cell(..., dataset_names=names)` after applying the same target
+rules as `cite_data()`.
+
+For a LiPDGraph notebook that uses a non-default endpoint, pass the endpoint
+that the notebook queried when building the data cell. The generated cell must
+retrieve from the same graph repository; otherwise the citation request can be
+silently directed at a different data source.
+
+### Saved notebook: use the path-based workflows
+
+For a backend that has a materialized notebook file but does not need to run a
+cell immediately, use:
+
+```python
+from provenance_agent import cite_data, cite_software
+
+software_libraries = cite_software(notebook_path)
+dataset_pairs = cite_data(notebook_path, targets=targets)
+```
+
+These calls analyze the file and add generated cells to it. They return the
+inputs used to build those cells, not citation DataFrames. A later execution
+run is still required for the data citation output. This path is useful for an
+export or file-based workflow, and pairs naturally with
+`backend/services/notebook_export_service.py`. It is less suitable when the
+agent already holds notebook content and an active conversation.
+
+### Natural-language routing: `run()` is the classifier inside the agent
+
+PaleoPAL's registry routes on `request.agent_type` and `request.capability`. It
+decides *which agent* handles a request; it does not decide whether a
+provenance request concerns software, data, or both. That sub-decision still
+belongs to the provenance agent, and `run()` is exactly the piece that makes
+it:
 
 ```python
 from provenance_agent.agent import run
 
 result = run(
-    "cite the software and datasets",
-    notebook_path="analysis.ipynb",
-    model=model,  # optional PaleoPAL LangChain-compatible model
+    request.user_input,
+    notebook_path=notebook_path,
+    model=paleopal_model,
 )
 ```
 
-The `%provenance` magic is a notebook convenience layer. A backend or service
-should call the Python interfaces instead of depending on IPython magic.
+Get `paleopal_model` from `LLMProviderFactory.get_langchain_model()` in
+`backend/services/llm_providers.py`, which returns a LangChain `BaseChatModel`.
+Do not pass a bare `LLMProvider`: its `generate_response()` returns a plain
+string and is not a Runnable, so the LCEL chain cannot use it. Passing `model=`
+keeps provider selection and credentials in the host and prevents
+`provenance-agent` from constructing a second model client.
 
-## Choose an integration strategy
+`run()` uses that model only for request classification; the workflows still
+perform static detection and inject the citation cells. It does not execute
+those cells, so the agent must handle the execution step and surface its
+result.
 
-### Host has a live notebook kernel
+Call the direct functions or builders instead of `run()` only when the
+capability itself already fixes the answer, for example a `cite_software`
+capability whose schema names the libraries. In that case there is nothing left
+to classify.
 
-Use the cell builders. Detect or resolve the targets, build the source, and
-execute it through PaleoPAL's existing execution client in the same kernel as
-the notebook. This keeps loaded `pylipd`, `pyleotups`, and LiPDGraph objects
-available for retrieval.
+## Translate requests and targets
 
-```python
-from provenance_agent.data import build_dataset_cell
-from provenance_agent.software import build_metadata_cell
+The package has two different target vocabularies:
 
-software_source = build_metadata_cell(libraries)
-data_source = build_dataset_cell(detected_pairs, endpoint=endpoint)
+| User/PaleoPAL target | Package meaning |
+| --- | --- |
+| `pandas`, `xarray` | An imported software library for `cite_software()` or `run()`. |
+| `TR04EVLI`, a study name, or a dataset ID | A data target passed through `targets=`. |
+| `df_filtered`, `D`, or another notebook variable | Internal detector output, not a user-facing data target. |
 
-# Pseudocode: use the execution method provided by PaleoPAL.
-await execution_client.run_cell(software_source)
-await execution_client.run_cell(data_source)
-```
+For data, detection returns pairs such as `["df_filtered", "LiPDGraph"]`.
+Those pairs tell the generated cell which live variable and provider to use;
+they are not names that should be shown as dataset choices in the PaleoPAL
+interface.
 
-`build_retrieval_cell()` returns a fragment for one dataset; use
-`build_dataset_cell()` when a complete cell is needed. The exact execution
-client method depends on the PaleoPAL host.
+Specific PyLiPD and LiPDGraph names can be passed into targeted retrieval. A
+specific PyleoTUPS study cannot be validated before the notebook's provider
+object runs, so the current workflow warns and leaves the notebook unchanged
+for that request. An integration should expose that as a limitation or offer
+the user an all-datasets request rather than treating the notebook variable as
+the study name.
 
-This approach is the best fit for an interactive PaleoPAL notebook because it
-does not require an unsaved notebook to exist on disk. The host can insert the
-generated source into the notebook and display or return the execution output.
+## Return values and execution results
 
-### Host has a notebook file but no live kernel
+The static and runtime parts have deliberately different contracts:
 
-Use `cite_software()` or `cite_data()` with the path to an `.ipynb` file. Both
-functions add generated cells to that file, replacing the package's previous
-generated cells on a repeat run.
+| Interface | Returns | Does not return |
+| --- | --- | --- |
+| `build_metadata_cell(...)` | Python source for a software citation cell | Citation metadata or execution output |
+| `build_dataset_cell(...)` | Python source for a dataset retrieval cell | Retrieved citations before the source is run |
+| `cite_software(...)` | Imported library names included in the cell | The software DataFrame |
+| `cite_data(...)` | `[variable, tool]` pairs included in the cell | The data metadata frames |
+| `run(...)` | Classification, dispatch, and static-verification envelope | Proof that a generated cell executed successfully |
 
-This works well for an exported notebook or a backend that has a materialized
-copy. It does not produce dataset citation output until the generated data
-cell is later run in a notebook kernel.
+The agent should therefore treat cell generation and cell execution as two
+separate stages. A successful `run()` or `cite_data()` call means that the
+notebook was analyzed and a cell was prepared; it does not mean that a remote
+dataset was reached or that a citation was retrieved.
 
-### Host has notebook content but no path
+For interactive use, capture the display and error output from the same
+execution that ran the generated source, and put it in the `AgentResponse`
+`result` while that context is still available. The generated `_bib_*` and
+`_meta_*` bindings are useful inside the execution session, but they are not a
+reliable transport format across restarts or persisted-state boundaries.
 
-The current direct APIs read and write `.ipynb` paths with `nbformat`. A
-PaleoPAL conversation or an unsaved VS Code notebook may have notebook JSON in
-memory without a stable path. An integration must either:
+Warnings are part of the normal contract. An unclear request, an unsupported
+target, or a missing dataset lineage can result in a warning and no notebook
+mutation. Those map onto `AgentStatus.SUCCESS` with an explanatory `message`,
+or `AgentStatus.NEEDS_CLARIFICATION` when the user could usefully rephrase.
+Runtime failures from a remote retrieval or a missing dependency occur later,
+when the generated cell executes, and should be reported as
+`AgentStatus.ERROR` rather than confused with classification warnings.
 
-1. materialize that content as a temporary or working `.ipynb` file; or
-2. add a content-based entry point that accepts notebook JSON and returns the
-   modified notebook or generated cells.
+## The notebook-context gap
 
-The second option is the better long-term interface for live editors. It keeps
-file handling and cell insertion with the host while preserving the existing
-path-based API for standalone use.
+`AgentRequest` carries `notebook_context: Dict[str, Any]`, documented as
+"Notebook variables and cell context". It never carries a notebook path. This
+package's public detector and path-based workflows accept a path, not notebook
+JSON held in memory.
 
-## Supplying PaleoPAL's model
+This is not an edge case for unsaved notebooks; it is the normal path for every
+provenance request. The smallest current adapter is to materialize
+`notebook_context` into a temporary `.ipynb` for the static analysis, and keep
+the conversation's execution session for running the generated source. A future
+content-based entry point in this package would remove that temporary-file
+boundary; it is an API improvement, not a reason to move dataset detection into
+PaleoPAL.
 
-Pass PaleoPAL's existing LangChain-compatible chat model to `run()`:
+The software cell builder can work from a library list directly, so a request
+that already names its libraries can skip materialization. Dataset detection
+still needs the notebook path today.
 
-```python
-from provenance_agent.agent import run
+## Integration acceptance tests
 
-model = LLMProviderFactory.get_langchain_model(
-    provider_type=provider_type,
-    model_name=model_name,
-)
+An integration is ready when these cases have been exercised:
 
-result = run(user_request, notebook_path, model=model)
-```
-
-Use PaleoPAL's current import path for `LLMProviderFactory`. The `model`
-argument is the integration point: it avoids constructing the standalone
-provider client in `provenance-agent` and avoids requiring that package's
-provider extra.
-
-The model should return the structured classification expected by the router.
-PaleoPAL's current wrapper is responsible for normalizing provider-specific
-reasoning preambles and JSON responses before the router parses them.
-
-The result has this shape:
-
-```python
-{
-    "status": "ok" or "warning",
-    "decision": {...},
-    "dispatch": {...},
-    "verification": {...},
-    "warning": str | None,
-}
-```
-
-- `status="ok"` means the request was classified and a workflow ran.
-- `status="warning"` means the request was unclear or unsupported. It is a
-  safe no-op, not an exception, and the notebook is not changed.
-- `dispatch` describes the requested workflow.
-- `verification` reports the static cell changes. It does not prove that a
-  generated cell ran successfully.
-
-If `model` is omitted, the package uses its own lazy provider registry and
-environment configuration. PaleoPAL can use compatible environment variables
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, and
-`XAI_API_KEY`), but passing its model is less ambiguous when both projects
-load `.env` files.
-
-## Execution and dependency requirements
-
-The direct APIs are synchronous. If they are called from an asynchronous
-PaleoPAL request handler, run them off the event loop:
-
-```python
-import asyncio
-
-result = await asyncio.to_thread(
-    run,
-    user_request,
-    notebook_path,
-    model,
-)
-```
-
-The process that executes generated dataset cells needs the dataset retrieval
-dependencies, `pylipd` and `pyleotups`. These are not core dependencies: they
-are the opt-in `data` extra (`pip install "provenance-agent[data]"`), because
-the package itself never imports them - only the generated cell source does.
-Install them wherever cells are executed, not necessarily where the package
-generates them. Note that a missing one surfaces as a plain
-`ModuleNotFoundError` raised inside the executed cell, not as a friendly
-install message.
-
-The notebook's own scientific packages, such as `pyleoclim` and `xarray`, still
-need to be installed in the notebook environment when its cells require them.
-Passing a model to `run()` does not install or load any provider integration.
-
-PaleoPAL should also account for its execution service's state rules:
-
-- Generated citation and metadata bindings use underscore-prefixed names such
-  as `_bib_<variable>` and `_meta_<variable>`.
-- If persisted kernel state drops underscore-prefixed variables, those names
-  cannot be relied on in a later execution request.
-- Non-picklable objects may be skipped when state is persisted. Consume the
-  result during the same execution, return it through the execution response,
-  or change the host's persistence policy rather than assuming the object will
-  be available later.
-- Untargeted retrieval may reuse objects already loaded by the notebook.
-  Targeted retrieval can load a fresh LiPD record and is safer when persistence
-  across execution calls is uncertain.
-
-## Keep these boundaries
-
-An integration should preserve the following behavior:
-
-1. Do not add a PaleoPAL import to the standalone package.
-2. Keep dataset detection and retrieval in `provenance-agent`.
-3. Keep cell generation separate from notebook mutation. Hosts with a live
-   kernel should use builders and manage insertion themselves.
-4. Keep LLM clients lazy. Importing the package and loading `%provenance`
-   should not require credentials.
-5. Keep dataset detection deterministic. The LLM routes the request; it does
-   not decide whether a notebook variable is a dataset.
-6. Treat warnings as non-mutating responses and map them to PaleoPAL's normal
-   clarification or warning flow.
-
-## Integration checklist
-
-Before shipping an integration, verify that it:
-
-1. chooses a host surface: live notebook, backend agent, or export hook;
-2. provides notebook content or a valid `.ipynb` path;
-3. decides whether the host will inject cells or execute builders directly;
-4. passes PaleoPAL's model to `run()` when using natural-language routing;
-5. runs synchronous calls outside the async event loop;
-6. installs retrieval dependencies in the environment that runs the cells;
-7. returns execution output instead of depending on underscore-prefixed state;
-8. tests both an already-saved notebook and an unsaved or in-memory notebook;
-9. tests a live data retrieval, not only static cell generation.
+1. The provenance agent is registered in `initialize_agents()` and appears in
+   `AgentRegistry.list_agents()` with its capabilities and schemas.
+2. A software request produces a software cell, the host executes it, and the
+   resulting metadata output reaches the PaleoPAL response path.
+3. A data request is submitted under the same `conversation_id` that ran the
+   notebook's data-loading cells, and returns the retrieval output or a clear
+   runtime error.
+4. A selected software library is matched against imports, while a selected
+   dataset is matched by dataset name or ID rather than notebook variable name.
+5. An unsupported or unclear request produces a warning without changing the
+   notebook, and maps onto the right `AgentStatus`.
+6. If `run()` is used, the host model is injected through `model=` using
+   `LLMProviderFactory.get_langchain_model()`, and the agent handles the
+   separate cell-execution step.
+7. The `notebook_context` materialization path is tested with unsaved changes.
