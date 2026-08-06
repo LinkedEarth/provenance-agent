@@ -20,12 +20,11 @@ Design decisions:
       caller that only wants the two direct functions. They stay at
       ``provenance_agent.agent.run``, ``provenance_agent.data.cite_data_tool``,
       and ``provenance_agent.software.cite_software_tool``.
-      Note that importing the agent no longer costs credentials either - the
-      chat client is built on first use, not at import - so this separation is
-      about dependency weight rather than about credentials.
-    - Each function is imported from the module that implements it, not from a
-      routing module in between. There is no longer an ``orchestrator`` layer to
-      pass through.
+      Importing the agent costs no credentials either - the chat client is built
+      on first use, not at import - so this separation is about dependency
+      weight rather than about credentials.
+    - Each function is imported from the module that implements it, with no
+      routing module in between.
 """
 
 from .data import cite_data

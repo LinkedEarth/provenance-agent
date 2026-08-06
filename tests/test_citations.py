@@ -6,10 +6,11 @@ workflow uses source metadata directly; the software schema also includes a
 note row for imported libraries without citations, except for standard-library
 imports, which are dropped entirely.
 
-The APA rendering and bibliography-assembly functions were removed along with
-the LLM chain behind them, so this module no longer covers render_apa,
-render_bibtex_strings_to_apa, render_bibtex_strings_to_df, or
-generate_bibliography.
+There is no APA or bibliography-assembly surface to cover: citations are
+surfaced as the injected cells' DataFrame output. One test pins that absence by
+name (render_apa, render_bibtex_strings_to_apa, render_bibtex_strings_to_df,
+generate_bibliography, generate_bibliography_cell, and llm.bibtex_to_apa), so
+reintroducing a rendering path here fails loudly rather than quietly.
 """
 
 import nbformat
@@ -102,10 +103,10 @@ def test_multiple_libraries_with_distinct_papers_are_not_corrupted():
     assert by_library.loc["pyleoclim", "doi"] == "10.1029/2022PA004509"
 
 
-# --- APA rendering is gone ---------------------------------------------------
+# --- no APA rendering surface ------------------------------------------------
 
 def test_apa_rendering_surface_is_removed():
-    """The LLM rendering path is deleted, not merely unused."""
+    """No LLM rendering path exists here - not merely an unused one."""
     for name in (
         "render_apa",
         "render_bibtex_strings_to_apa",

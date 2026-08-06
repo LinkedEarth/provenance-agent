@@ -2,13 +2,15 @@
 test_dataset_detection.py
 
 Purpose:
-    Unit tests for the pure legacy helpers in dataset_detection.py: building the
-    old LLM detection prompt (build_detection_prompt), parsing model replies into
-    [variable, tool] pairs (parse_detection_response), and exercising the active
-    deterministic notebook-path entry point.
+    Unit tests for the pure helpers in dataset_detection.py: building the
+    deprecated LLM detection prompt (build_detection_prompt), parsing model
+    replies into [variable, tool] pairs (parse_detection_response), and
+    exercising the active deterministic notebook-path entry point. The
+    deprecated helpers are covered so the retained rollback path stays
+    known-good.
 
 Implementation:
-    The legacy prompt/parser tests operate on plain strings. The active
+    The prompt and parser tests operate on plain strings. The active
     detect_datasets test writes a small notebook and verifies deterministic
     source-to-analysis tracing without network or LLM calls.
 

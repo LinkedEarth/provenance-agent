@@ -14,10 +14,10 @@ Purpose:
     test_software.py; this file is about what a caller is entitled to import.
 
 Implementation:
-    Fully offline. cite_software reads imports and writes a notebook, no
-    Gemini. cite_data runs against a monkeypatched detector, so no network
-    call is made. Both write to a tmp output_path so the fixture notebooks
-    are never mutated.
+    Fully offline. cite_software reads imports and writes a notebook, with no
+    model involved. cite_data runs against a monkeypatched detector, so no
+    network call is made. Both write to a tmp output_path so the fixture
+    notebooks are never mutated.
 
 Design decisions:
     - fmt is accepted and ignored rather than validated, so these tests pin
@@ -191,7 +191,7 @@ def test_cite_data_does_not_use_the_deprecated_llm_detector(tmp_path, monkeypatc
         raise AssertionError("the deprecated LLM detection path was used")
 
     class _NoClient:
-        """Stands in for the Gemini client; any use of it fails the test."""
+        """Stands in for the shared chat client; any use of it fails the test."""
 
         def __getattr__(self, name):
             detonate()

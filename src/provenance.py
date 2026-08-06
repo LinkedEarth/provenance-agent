@@ -3,15 +3,14 @@ Stable ``%load_ext provenance`` entry point.
 
 Purpose:
     ``%load_ext`` takes a top-level module name, and ``%load_ext provenance`` is
-    the notebook-facing command this project has always documented. Keeping that
-    command working means keeping an importable top-level ``provenance`` module,
-    even though the implementation now lives inside the ``provenance_agent``
-    package.
+    the notebook-facing command this project documents. Keeping that command
+    working means keeping an importable top-level ``provenance`` module, while
+    the implementation lives inside the ``provenance_agent`` package.
 
 Implementation:
     A forwarding shim, and nothing else. It re-exports
     ``load_ipython_extension`` - the function IPython calls - plus the public
-    helpers the magic API has always exposed (``cite``, ``set_notebook_path``,
+    helpers of the magic API (``cite``, ``set_notebook_path``,
     ``resolve_notebook_path``, ``ProvenanceMagics``) from
     ``provenance_agent.magic``.
 

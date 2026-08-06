@@ -24,16 +24,15 @@ Implementation:
 Design decisions:
     - Citations/ is package data resolved with
       importlib.resources.files("provenance_agent"), not a directory found by
-      walking up from __file__ to a repository root. The old walk only worked
-      when the code was run out of a source checkout; the resource lookup keeps
-      working from an installed package and from any working directory. The
-      files are read through the returned Traversable's open(), never by
-      handing the resource object to os.path.
-    - There is no rendering layer here. APA rendering was removed along with the
-      LLM chain that produced it: citations are surfaced as the injected cell's
-      DataFrame output, not as assembled text. The data workflow still accepts
-      an `fmt` argument for compatibility, but it is ignored, so no module
-      renders citation text in any format.
+      walking up from __file__ to a repository root. A walk would only work when
+      the code runs out of a source checkout, while the resource lookup works
+      from an installed package and from any working directory. The files are
+      read through the returned Traversable's open(), never by handing the
+      resource object to os.path.
+    - There is no rendering layer here. Citations are surfaced as the injected
+      cell's DataFrame output, not as assembled text. The data workflow accepts
+      an `fmt` argument for compatibility but ignores it, so no module renders
+      citation text in any format.
     - The cell-lifecycle helpers live here rather than in notebook_io because
       they are written against the frame names this module's output is bound to.
       notebook_io knows how to read a notebook; only this module knows what
@@ -292,12 +291,12 @@ def remove_provenance_cells(nb, frame: str) -> None:
 
 def remove_legacy_combine_cells(nb) -> None:
     """
-    Strips the combined-bibliography cell earlier versions used to inject.
+    Strips the combined-bibliography cell earlier versions of this tool injected.
 
-    The two workflows now each own one self-displaying cell, so nothing creates
-    this cell anymore. Notebooks run against an older version still carry one,
-    and since no code manages it now it would linger forever and re-display a
-    stale bibliography. Both workflows call this before writing.
+    Each workflow owns one self-displaying cell, and nothing creates a combined
+    cell. A notebook processed by an older version still carries one, and since
+    no code manages it, it would linger forever and re-display a stale
+    bibliography. Both workflows call this before writing.
 
     Args:
         nb: an nbformat notebook node (modified in place)

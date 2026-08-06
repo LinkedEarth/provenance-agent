@@ -40,6 +40,9 @@ Implementation:
     - split_targets(pairs, targets): treats every non-empty target as an exact
       dataSetName filter and keeps all detected pairs so each retrieval cell
       can handle that name for its own provider.
+    - pyleotups_target_warning(pairs, targets): returns the message that stops a
+      specific-study request when a PyleoTUPS source is present, since its
+      study names only exist inside the live provider object.
     - inject_retrieval_cells(nb, pairs, endpoint, fmt, dataset_names): appends
       the single dataset cell covering every pair to an nbformat notebook node,
       or nothing when pairs is empty.
@@ -52,10 +55,9 @@ Implementation:
 
 Design decisions:
     - The public function, the workflow, and the cell builders live in one
-      module because they are one operation at three levels of detail. They used
-      to be split across an orchestrator module, which meant a reader chasing
-      "what does cite_data actually do" crossed a file boundary to reach a
-      one-line delegation.
+      module because they are one operation at three levels of detail. A reader
+      chasing "what does cite_data actually do" never crosses a file boundary to
+      reach a one-line delegation.
     - cite_data delegates to generate_data_workflow rather than replacing it.
       Both names are public: cite_data is the API callers and the agent use,
       generate_data_workflow is the step name notebook tooling regenerates cells
@@ -75,18 +77,19 @@ Design decisions:
       LiPDGraph, so targeted requests avoid loading unrelated datasets. A
       specific PyleoTUPS study name or ID cannot be resolved before the live
       object runs, so it warns and leaves the notebook unchanged.
-    - `fmt` is accepted everywhere it appears and ignored everywhere. APA
-      rendering was removed with the LLM chain that produced it, so there is no
-      second format to select; "bibtex", "apa", and any other value produce the
-      same cell. The parameter is retained so callers and the agent's
-      RouteDecision stay stable for a future non-LLM APA implementation.
+    - `fmt` is accepted everywhere it appears and ignored everywhere. Nothing in
+      the project renders citation text, so there is no second format to select:
+      "bibtex", "apa", and any other value produce the same cell. The parameter
+      is retained so callers and the agent's RouteDecision stay stable for a
+      future non-LLM APA implementation.
     - Unsupported tools raise ValueError so a mis-detected pair fails loudly
       rather than silently producing an empty bibliography.
     - Both PyLiPD's get_bibtex() and PyleoTUPS' get_publications() return
       (citations, metadata DataFrame), and each retrieval block keeps its
       _meta_{variable} binding for callers that need it.
-    - One cell for every dataset source, not one per dataset, so a retrieval
-      failure for one source stops the whole cell.
+    - One cell covers every dataset source rather than one cell per source, so
+      the notebook gains exactly one retrieval cell to run or delete. The
+      tradeoff is that a retrieval failure for one source stops the whole cell.
 """
 
 import ast
@@ -145,8 +148,8 @@ def build_retrieval_cell(
     This is a fragment, not a standalone cell: it leaves _bib_{variable} and
     _meta_{variable} bound in the kernel and prints nothing. The containing
     cell displays the metadata frame after all retrieval blocks run. Targeted
-    PyLiPD and LiPDGraph blocks load only the requested dataset names; PyleoTUPS
-    keeps its existing post-retrieval filter behavior.
+    PyLiPD and LiPDGraph blocks load only the requested dataset names, while a
+    targeted PyleoTUPS block filters its metadata after retrieval.
 
     Args:
         variable: the notebook variable holding the dataset (from detection)
@@ -156,7 +159,7 @@ def build_retrieval_cell(
             (from extract_lipdgraph_endpoint). Falls back to _LIPDVERSE_ENDPOINT
             when None.
         dataset_names: optional exact dataset names to load directly for PyLiPD
-            and LiPDGraph; PyleoTUPS retains its existing metadata filter.
+            and LiPDGraph; for PyleoTUPS they filter the retrieved metadata.
 
     Returns:
         Python source binding _bib_{variable} and _meta_{variable}

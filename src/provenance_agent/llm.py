@@ -61,18 +61,14 @@ Design decisions:
       different task would silently cost them money and latency. All of this is
       a documented convenience, not a contract - ours always wins, and nothing
       breaks if PaleoPAL renames a variable.
-    - The client is built lazily so importing costs nothing and needs nothing.
-      It used to be constructed at module scope, which meant importing
-      `provenance_agent.agent` - and therefore `%load_ext provenance` - failed
-      without credentials. That broke a fresh clone: `.env` is untracked, so a
-      new contributor running the documented `pytest tests/ -q` got collection
-      errors from the three test modules that import the agent, despite the
-      suite being genuinely offline. Deferring construction to first access
-      fixes that. The tradeoff is that a missing key is now reported when the
-      model is first used rather than at import; that is the intended
-      behavior, not an oversight. Substitute a client by assigning `_CLIENT`,
-      never by patching the `llm` name, because reading `llm` is what triggers
-      construction.
+    - The client is built lazily, so importing this module costs nothing and
+      needs no credentials. That is what lets `provenance_agent.agent` import,
+      `%load_ext provenance` load, and the offline test suite run on a fresh
+      clone, which has no `.env` because `.env` is untracked. The tradeoff is
+      that a missing key is reported when the model is first used rather than
+      at import; that is the intended behavior, not an oversight. Substitute a
+      client by assigning `_CLIENT`, never by patching the `llm` name, because
+      reading `llm` is what triggers construction.
     - Credentials are validated here, before the chat class is constructed.
       Pydantic-based chat classes raise a `ValidationError` about a field name
       when a key is absent, which reads as a bug in this project rather than a
@@ -90,10 +86,14 @@ Design decisions:
       interactive and resolves *both* lookups from the kernel's working
       directory, so a .env buried in src/ is invisible there. Keep the .env at
       the repository root (or export the key) for `%load_ext provenance`.
-    - APA rendering has been removed. There is no `bibtex_to_apa` chain here
-      anymore, because APA output is no longer produced by an LLM. `fmt` is
-      still accepted by the data workflow but is ignored, so nothing in this
-      module renders citation text.
+    - This module builds a chat client and normalizes a reply to text, and
+      nothing else. No citation text is rendered by a model anywhere in the
+      project: `fmt` is accepted by the data workflow but ignored, and citations
+      are surfaced as the injected cells' DataFrame output.
+    - `build_llm` normalizes an exact xAI model id of `grok-4` to `grok-4.3`, so
+      a configuration still naming the legacy model keeps working. Only that
+      exact value on the xAI provider is rewritten; every other identifier is
+      passed through untouched.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ class ProviderSpec(NamedTuple):
 
 
 # gemini-flash-latest is an alias that tracks the current Gemini Flash model, so
-# a specific version being retired does not 404 us (gemini-2.5-flash was retired).
+# a pinned version being retired by Google does not 404 us.
 PROVIDERS: dict[str, ProviderSpec] = {
     "google": ProviderSpec(
         module="langchain_google_genai",
@@ -244,7 +244,8 @@ def build_llm(
         provider: provider name; defaults to PROVENANCE_LLM_PROVIDER, then
             DEFAULT_PROVIDER
         model: model identifier; defaults to PROVENANCE_LLM_MODEL, then the
-            provider's default_model
+            provider's default_model. On xAI, an exact `grok-4` is normalized
+            to `grok-4.3` no matter which of those supplied it.
         temperature: sampling temperature, 0 for reproducible classification;
             omitted when the selected provider does not support it
         **kwargs: forwarded verbatim to the provider's chat class

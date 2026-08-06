@@ -1,5 +1,5 @@
 """
-Structural scan enforcing the two import rules the migration established.
+Structural scan enforcing the project's two import rules.
 
 Purpose:
     Nothing in the repository may mutate sys.path to find this project, and
@@ -60,8 +60,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCANNED_DIRECTORIES = ("src", "tests")
 NOTEBOOK_DIRECTORY = "notebooks"
 
-# Module names that no longer exist at the top level. Importing any of them
-# without a package qualifier means the file predates the package migration.
+# Module names that do not exist at the top level. Importing any of them
+# without a package qualifier means the file is reaching for a flat module
+# rather than the installed package.
 RETIRED_MODULES = frozenset({
     "notebook_parser",
     "bibliography",
