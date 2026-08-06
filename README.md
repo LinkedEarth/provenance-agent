@@ -71,7 +71,10 @@ agent routing needs one. `google` is the default example; swap it for `openai`,
 | OpenAI | `pip install -e ".[openai]"` | `gpt-4o-mini` |
 | Anthropic | `pip install -e ".[anthropic]"` | `claude-sonnet-5` |
 | Ollama (local) | `pip install -e ".[ollama]"` | `llama3.1` |
-| xAI | `pip install -e ".[xai]"` | `grok-4` |
+| xAI | `pip install -e ".[xai]"` | `grok-4.3` |
+
+For compatibility, an exact `PROVENANCE_LLM_MODEL=grok-4` setting is rerouted
+to `grok-4.3`; other model identifiers are preserved.
 
 ```
 Note on RuntimeError: LLM provider 'xai' needs the langchain_xai package, which is not

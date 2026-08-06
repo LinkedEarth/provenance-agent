@@ -25,7 +25,8 @@ Implementation:
       (default: the provider's entry in the registry).
     - `llm`: the shared client, resolved through a PEP 562 module-level
       `__getattr__` that calls `get_llm()`. It is built on first access, not at
-      import, cached in `_CLIENT`, and uses temperature=0 for determinism.
+      import, cached in `_CLIENT`, and uses temperature=0 where the provider
+      supports it. Anthropic is constructed without a temperature argument.
     - `message_text(message)`: normalizes a response's content to plain text
       (providers return either a string or a list of typed content parts).
 
@@ -120,6 +121,8 @@ class ProviderSpec(NamedTuple):
             key; any one of them being set is enough. Empty for local providers
             that need no credentials.
         install: the pip command that makes this provider importable
+        supports_temperature: whether the provider accepts the shared
+            temperature argument
     """
 
     module: str
@@ -127,6 +130,7 @@ class ProviderSpec(NamedTuple):
     default_model: str
     key_variables: tuple[str, ...]
     install: str
+    supports_temperature: bool = True
 
 
 # gemini-flash-latest is an alias that tracks the current Gemini Flash model, so
@@ -138,6 +142,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="gemini-flash-latest",
         key_variables=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         install='pip install "provenance-agent[google]"',
+        supports_temperature=True,
     ),
     "openai": ProviderSpec(
         module="langchain_openai",
@@ -145,6 +150,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="gpt-4o-mini",
         key_variables=("OPENAI_API_KEY",),
         install='pip install "provenance-agent[openai]"',
+        supports_temperature=True,
     ),
     "anthropic": ProviderSpec(
         module="langchain_anthropic",
@@ -152,6 +158,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="claude-sonnet-5",
         key_variables=("ANTHROPIC_API_KEY",),
         install='pip install "provenance-agent[anthropic]"',
+        supports_temperature=False,
     ),
     "ollama": ProviderSpec(
         module="langchain_ollama",
@@ -159,13 +166,15 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="llama3.1",
         key_variables=(),  # runs locally; no credentials at all
         install='pip install "provenance-agent[ollama]"',
+        supports_temperature=True,
     ),
     "xai": ProviderSpec(
         module="langchain_xai",
         class_name="ChatXAI",
-        default_model="grok-4",
+        default_model="grok-4.3",
         key_variables=("XAI_API_KEY",),
         install='pip install "provenance-agent[xai]"',
+        supports_temperature=True,
     ),
 }
 
@@ -236,7 +245,8 @@ def build_llm(
             DEFAULT_PROVIDER
         model: model identifier; defaults to PROVENANCE_LLM_MODEL, then the
             provider's default_model
-        temperature: sampling temperature, 0 for reproducible classification
+        temperature: sampling temperature, 0 for reproducible classification;
+            omitted when the selected provider does not support it
         **kwargs: forwarded verbatim to the provider's chat class
 
     Returns:
@@ -250,6 +260,8 @@ def build_llm(
     name = resolve_provider(provider)
     spec = PROVIDERS[name]
     model_id = model or os.getenv("PROVENANCE_LLM_MODEL") or spec.default_model
+    if name == "xai" and model_id == "grok-4":
+        model_id = "grok-4.3"
 
     if spec.key_variables and not any(os.getenv(v) for v in spec.key_variables):
         accepted = " or ".join(spec.key_variables)
@@ -269,7 +281,10 @@ def build_llm(
         ) from exc
 
     chat_class = getattr(module, spec.class_name)
-    return chat_class(model=model_id, temperature=temperature, **kwargs)
+    client_kwargs = dict(kwargs)
+    if spec.supports_temperature:
+        client_kwargs["temperature"] = temperature
+    return chat_class(model=model_id, **client_kwargs)
 
 
 _CLIENT = None
